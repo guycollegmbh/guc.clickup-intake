@@ -1,0 +1,38 @@
+/*
+ * GUYCOLLE theme for Filament 5.
+ *
+ * Kept deliberately small: brand colour and font come from the panel provider
+ * (colors(), font()), this file only removes radii and shadows via Tailwind
+ * theme tokens instead of overriding individual Filament classes. That way
+ * Filament updates rarely break it.
+ */
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+@import '@fontsource-variable/source-sans-3';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/filament/**/*';
+
+@theme {
+    --radius-xs: 0;
+    --radius-sm: 0;
+    --radius-md: 0;
+    --radius-lg: 0;
+    --radius-xl: 0;
+    --radius-2xl: 0;
+    --radius-3xl: 0;
+
+    --shadow-2xs: 0 0 #0000;
+    --shadow-xs: 0 0 #0000;
+    --shadow-sm: 0 0 #0000;
+    --shadow-md: 0 0 #0000;
+    --shadow-lg: 0 0 #0000;
+    --shadow-xl: 0 0 #0000;
+    --shadow-2xl: 0 0 #0000;
+}
+
+/* Brand dark (#231F20) for the sidebar in dark mode instead of Filament's gray-900. */
+.dark .fi-sidebar,
+.dark .fi-topbar,
+.dark .fi-body {
+    background-color: #231f20;
+}

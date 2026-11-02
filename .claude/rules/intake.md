@@ -39,7 +39,14 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
 
 ## Zugriff und Darstellung
 
-- **R11 Login nur Entra ID** (Socialite, nur GUYCOLLE-Tenant). Kein lokales Passwort.
+- **R11 Login nur Entra ID** (Socialite, nur GUYCOLLE-Tenant). Kein lokales Passwort. User über
+  `entra_object_id`, nie über die E-Mail. Zugang steuert die Gruppenzuweisung der Enterprise-App.
+- **R11a Nur delegierte Microsoft-Berechtigungen** (E1). Graph-Aufrufe immer mit dem Token des
+  betroffenen Users, nie Application Permissions. Ausnahme: der Setup-Assistent mit dem
+  befristeten Admin-Token, der nicht gespeichert wird.
+- **R11b ClickUp mit dem Token des handelnden Users** (E2). Kein Service-User.
+- **R11c Tokens und Secrets nur verschlüsselt** (`encrypted`-Cast, `settings`). Nie in Logs,
+  Exceptions, Job-Payloads oder Fehlermeldungen.
 - **R12 Sichtbarkeit über Policies.** `member` sieht und bearbeitet nur eigene Items, `admin` alle.
   Resource «Regeln» nur `admin`. Gilt auch für Livewire-Methoden, Filament-Aktionen, Bulk-Aktionen
   und die Route für Inline-Bilder und Anhänge.

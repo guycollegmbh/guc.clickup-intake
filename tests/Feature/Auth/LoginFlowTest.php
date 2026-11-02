@@ -1,0 +1,96 @@
+<?php
+
+use App\Models\User;
+use Laravel\Socialite\Facades\Socialite;
+use SocialiteProviders\Azure\User as SocialiteUser;
+
+function fakeSocialiteUser(array $claims): SocialiteUser
+{
+    $user = (new SocialiteUser)->setRaw([
+        'id' => $claims['oid'] ?? 'x',
+        'displayName' => 'Anna Muster',
+        'userPrincipalName' => 'anna@guycolle.ch',
+        'mail' => 'anna@guycolle.ch',
+    ])->map([
+        'id' => $claims['oid'] ?? 'x',
+        'name' => 'Anna Muster',
+        'email' => 'anna@guycolle.ch',
+    ]);
+
+    $user->setRefreshToken('refresh-1');
+    $user->setAccessTokenResponseBody(['id_token' => fakeIdToken($claims)]);
+
+    return $user;
+}
+
+function mockSocialiteCallback(SocialiteUser $user): void
+{
+    $driver = Mockery::mock();
+    $driver->shouldReceive('user')->andReturn($user);
+    Socialite::shouldReceive('driver')->with('azure')->andReturn($driver);
+}
+
+it('sends guests from the panel to the login page', function () {
+    $this->get('/')->assertRedirect(route('login'));
+});
+
+it('explains the missing setup when the app is not connected to Microsoft 365', function () {
+    $this->get(route('login'))
+        ->assertOk()
+        ->assertSee('php artisan intake:install')
+        ->assertDontSee('Mit Microsoft anmelden');
+
+    $this->get(route('auth.microsoft.redirect'))->assertStatus(503);
+});
+
+it('shows the Microsoft button once configured', function () {
+    configureMicrosoftApp();
+
+    $this->get(route('login'))->assertOk()->assertSee('Mit Microsoft anmelden');
+});
+
+it('redirects to the tenant authorize endpoint with the delegated scopes', function () {
+    configureMicrosoftApp();
+
+    $location = $this->get(route('auth.microsoft.redirect'))->assertRedirect()->headers->get('Location');
+
+    expect($location)
+        ->toStartWith('https://login.microsoftonline.com/'.TEST_TENANT_ID.'/')
+        ->toContain('offline_access')
+        ->toContain('Mail.ReadWrite')
+        ->toContain('Mail.Send');
+});
+
+it('signs the user in after a valid callback', function () {
+    configureMicrosoftApp();
+    mockSocialiteCallback(fakeSocialiteUser(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']));
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))->assertRedirect('/');
+
+    $this->assertAuthenticatedAs(User::firstWhere('entra_object_id', 'oid-anna'));
+    $this->get('/')->assertOk();
+});
+
+it('refuses a callback from another tenant', function () {
+    configureMicrosoftApp();
+    mockSocialiteCallback(fakeSocialiteUser(['tid' => 'evil-tenant', 'oid' => 'oid-mallory']));
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))
+        ->assertRedirect(route('login'))
+        ->assertSessionHas('login_error');
+
+    $this->assertGuest();
+    expect(User::count())->toBe(0);
+});
+
+it('shows a hint when Microsoft denies the sign-in (user not assigned)', function () {
+    configureMicrosoftApp();
+
+    $this->get(route('auth.microsoft.callback', ['error' => 'access_denied']))
+        ->assertRedirect(route('login'))
+        ->assertSessionHas('login_error');
+});
+
+it('denies the panel to a deactivated user', function () {
+    $this->actingAs(User::factory()->inactive()->create())->get('/')->assertForbidden();
+});

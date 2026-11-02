@@ -1,7 +1,8 @@
 # 01: Entscheide (Schritt 0, Konzept-Check)
 
-Stand 2026-11-02, Runde 2. Status: **E3 bis E5 freigegeben, E1 und E2 geändert, warten auf
-Bestätigung.** Nach Freigabe verbindlich (siehe `.claude/rules/intake.md`).
+Stand 2026-11-02, Runde 2. Status: **E1 bis E5 freigegeben am 2026-11-02, verbindlich** (siehe
+`.claude/rules/intake.md`). Tenant-Prüfung: Gerätecode-Ablauf erlaubt, keine bekannte
+Richtlinie zur Anmeldehäufigkeit.
 
 Grundlage: `docs/AGENT_PROMPT.md`, die Nachbar-Repos `guc.filament-theme`, `guc.quotebot`,
 `guc.cronman`, das Inventar in `guc.ansible` und die Rückmeldung des Inhabers vom 2026-11-02:

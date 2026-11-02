@@ -3,15 +3,47 @@
 Internes Tool der GUYCOLLE GmbH. Outlook-Mails mit der Kategorie «ClickUp» werden per Microsoft
 Graph in eine Triage-Queue geholt und dort zu ClickUp-Tasks.
 
-- Spezifikation: `docs/AGENT_PROMPT.md` (verbindlich)
-- Entscheide: `docs/01-decisions.md` (Schritt 0, nach Freigabe verbindlich)
+- Spezifikation: `docs/AGENT_PROMPT.md`
+- Entscheide: `docs/01-decisions.md` (freigegeben, gehen der Spezifikation vor)
 - Harte Regeln: `.claude/rules/intake.md`
-- Arbeitsstand: `STATUS.md` (ab Schritt 1)
+- Arbeitsstand: `STATUS.md`
 
 ## Stack
 
-Vorgabe gemäss Spezifikation, Bestätigung in Schritt 0: Laravel + Filament, SQLite, Redis (Queue,
-Cache), Pest, GitHub Actions, Theme `guycollegmbh/guc.filament-theme`, Hosting IONOS-VPS mit Caddy.
+Laravel 13, Filament 5 (Panel unter `/`, Id `app`), Livewire 4, PHP 8.4 (lokal geht 8.5), SQLite,
+Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
+
+- Theme: `resources/css/filament/app/theme.css` (Radius 0, keine Schatten über Tailwind-Tokens),
+  Farbe und Schrift im `AppPanelProvider`. Source Sans 3 selbst gehostet
+  (`@fontsource-variable/source-sans-3`), kein Google-Fonts-Aufruf.
+- Seiten ausserhalb des Panels (Login, Setup): `resources/css/app.css`, Blade.
+
+## Struktur
+
+- `app/Microsoft/`: Entra-App (`MicrosoftApp`, Zugangsdaten aus `settings`, Fallback `.env`),
+  Login (`MicrosoftLogin`). Graph-Client folgt in Schritt 3.
+- `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
+- `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.
+
+## Auth
+
+- Nur Microsoft (Socialite `azure`, Single-Tenant). Kein Passwort. Routen in `routes/web.php`.
+- Zugang steuert Entra: Enterprise-App mit «Zuweisung erforderlich», Gruppe zugewiesen.
+- User per `entra_object_id`, `tid` geprüft. `role` und `active` nicht mass-assignable.
+- Notweg: `php artisan intake:make-admin {email}`.
+
+## Lokal
+
+```bash
+composer install && npm install && npm run build
+cp .env.example .env && php artisan key:generate
+touch database/database.sqlite && php artisan migrate
+php artisan serve
+vendor/bin/pest && vendor/bin/pint --test
+```
+
+Lokal ohne Redis: `QUEUE_CONNECTION=database`, `CACHE_STORE=database` (Vorgabe in `.env.example`).
+Tests verbieten echte HTTP-Aufrufe (`Http::preventStrayRequests()` in `tests/Pest.php`).
 
 ## Konventionen
 
@@ -19,6 +51,11 @@ Cache), Pest, GitHub Actions, Theme `guycollegmbh/guc.filament-theme`, Hosting I
 - Code, Kommentare, Commits, Branches Englisch. Conventional Commits.
 - Gearbeitet wird auf `develop`. `main` bleibt bis zum ersten Deploy unberührt.
 - Keine KI-Komponente in V1. Keine Kopplung zum Ticketsystem guycolle.help.
+
+## Betrieb
+
+vps06, `intake.guycolle.services`, Caddy, Queue-Worker als systemd-Unit, Scheduler per Cron.
+Details folgen in `docs/02-setup.md` (Schritt 7).
 
 ## Agenten (`.claude/agents/`)
 
