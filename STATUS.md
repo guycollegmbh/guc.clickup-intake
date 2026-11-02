@@ -6,7 +6,7 @@ Stand 2026-11-02, Branch `develop`.
 |---|---|---|
 | 0 | Konzept-Check, `docs/01-decisions.md` | erledigt, freigegeben |
 | 1 | Scaffold, Theme, Microsoft-Login, CI | erledigt |
-| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, Einrichtung im Tenant ok, Login-Test offen |
+| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, im Tenant geprüft |
 | 2 | Datenmodell Intake | offen |
 | 3 | Intake über Graph | offen |
 | 4 | Triage in Filament | offen |
@@ -71,10 +71,14 @@ Code, Security und Architektur: keine kritischen oder hohen Befunde. Behoben:
   Enterprise-App, Zustimmung und Secret angelegt, erster Admin gesetzt. Die Registration heisst
   noch «GUYCOLLE ClickUp-Intake» ohne Suffix (vor der Namensregel angelegt), sie wird beim nächsten
   `--force`-Lauf zu «(local)».
+- Zweiter Lauf mit `--force` für Port 8001: eigene App über die Objekt-ID gefunden, Rücksprung-
+  Adresse ersetzt, umbenannt zu «(local)», altes Secret entfernt.
+- Login im Browser mit Gruppenzuweisung erfolgreich (nach Fix: bestehender User scheiterte am
+  fehlenden Passwort-Attribut, Test ergänzt).
+- Delegierter Token geprüft: Refresh liefert `Mail.ReadWrite Mail.Send MailboxSettings.ReadWrite`,
+  `/me/mailFolders/inbox` und `/me/outlook/masterCategories` lesbar.
 
 ## Offen und bekannt
 
-- Erster Lauf gegen den echten Tenant steht aus.
 - Warnung vor Ablauf des Secrets und Admin-Seite «Microsoft 365» folgen mit Schritt 4 bzw. 7.
-- Im Browser noch nicht gegen einen echten Tenant geprüft.
 - `.env.production.example` bzw. Deploy-Checkliste folgt in Schritt 7 (`docs/02-setup.md`).
