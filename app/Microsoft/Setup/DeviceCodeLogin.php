@@ -3,6 +3,7 @@
 namespace App\Microsoft\Setup;
 
 use Closure;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use RuntimeException;
@@ -49,14 +50,22 @@ class DeviceCodeLogin
         while (now()->lessThan($deadline)) {
             Sleep::for($interval)->seconds();
 
-            $token = Http::asForm()->timeout(30)->post(self::AUTHORITY.'/token', [
-                'grant_type' => 'urn:ietf:params:oauth:grant-type:device_code',
-                'client_id' => self::CLIENT_ID,
-                'device_code' => $code->json('device_code'),
-            ]);
+            try {
+                $token = Http::asForm()->timeout(30)->post(self::AUTHORITY.'/token', [
+                    'grant_type' => 'urn:ietf:params:oauth:grant-type:device_code',
+                    'client_id' => self::CLIENT_ID,
+                    'device_code' => $code->json('device_code'),
+                ]);
+            } catch (ConnectionException) {
+                continue; // transient, the admin may already have entered the code
+            }
 
             if ($token->successful()) {
                 return AdminToken::fromTokenResponse($token->json());
+            }
+
+            if ($token->serverError() || $token->json('error') === 'temporarily_unavailable') {
+                continue;
             }
 
             match ($token->json('error')) {

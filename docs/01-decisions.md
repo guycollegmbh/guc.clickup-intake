@@ -50,35 +50,33 @@ Zustimmungsabfrage für die User):
 
 ### Setup-Assistent («Mit Microsoft 365 verbinden»)
 
-**Umsetzung 1b (2026-11-02, zur Bestätigung):** Der Assistent ist ein interaktiver Befehl
-`php artisan intake:install` statt einer Webseite `/setup`. Ablauf für den Admin gleich
-(Gerätecode), aber keine unauthentisierte Einrichtungs-Route und weniger Code. Weitere Optionen:
-`--renew-secret` (neues Secret, altes gelöscht, Rücksprung-Adresse dieser Installation ergänzt),
-`--manual` (Handweg), `--force`. Der Lauf ist idempotent und kann nach einem Abbruch wiederholt
-werden. Rücksprung-Adresse immer aus `APP_URL`. Die Punkte unten gelten sinngemäss.
+Umgesetzt in Schritt 1b als interaktiver Befehl `php artisan intake:install` statt einer Webseite
+`/setup` (gleicher Ablauf für den Admin, keine unauthentisierte Einrichtungs-Route). Erster Lauf
+gegen den Tenant am 2026-11-02 erfolgreich.
 
-1. `php artisan intake:install` auf dem Server gibt einen einmaligen Setup-Link aus. `/setup` ist
-   nur erreichbar, solange die App nicht eingerichtet ist, und nur mit diesem Link.
-2. Der Admin meldet sich im Assistenten per Gerätecode an (microsoft.com/devicelogin) über den
-   öffentlichen Client «Microsoft Graph Command Line Tools», denselben, den `Connect-MgGraph`
-   verwendet. Der Assistent fordert dafür nur befristet `Application.ReadWrite.All` und
-   `DelegatedPermissionGrant.ReadWrite.All` an. Dieser Token wird nicht gespeichert.
-3. Der Assistent legt per Graph an:
-   - App-Registration «GUYCOLLE ClickUp-Intake», Single-Tenant, Redirect-URI
-     `https://intake.guycolle.services/auth/microsoft/callback`, Logo, die Scopes oben
-   - Client-Secret (24 Monate)
-   - Service Principal (Enterprise-App) mit «Zuweisung erforderlich» = ja
-   - Admin Consent für die Scopes (`oauth2PermissionGrant`, `AllPrincipals`)
-4. Client-ID, Tenant-ID und Secret landen verschlüsselt in der Datenbank (`settings`, verschlüsselt
-   mit `APP_KEY`), nicht in `.env`. Es gibt keinen `.env`-Fallback. Auch der Handweg
-   (`intake:install --manual`) schreibt in `settings`.
-5. Der Admin wird erster App-Admin (zugeordnet über die `oid` aus dem Admin-Token, nie über die
-   E-Mail). Danach weist er der Enterprise-App die Gruppe zu (im
-   Entra-Portal, wie geplant). Der Assistent zeigt den direkten Link dorthin.
+1. Der Admin meldet sich per Gerätecode an (öffentlicher Client «Microsoft Graph Command Line
+   Tools»). Angefordert werden nur `Application.ReadWrite.All` und
+   `DelegatedPermissionGrant.ReadWrite.All`, ohne `offline_access`. Der Token wird nicht
+   gespeichert. «Im Namen der Organisation zustimmen» nicht ankreuzen.
+2. Tenant und Konto werden angezeigt und müssen bestätigt werden. Bei bestehender Einrichtung
+   muss der Tenant übereinstimmen.
+3. Der Befehl legt per Graph an: App-Registration (Single-Tenant, eine je Umgebung, ausserhalb
+   von Produktion mit Suffix wie «(local)»), Enterprise-App mit «Zuweisung erforderlich»,
+   Admin-Zustimmung `AllPrincipals` für die Scopes oben, Client-Secret (24 Monate).
+4. Eine bestehende Registration wird **nur über die selbst gespeicherte Objekt-ID** gefunden,
+   nie über den Namen (sonst könnte eine vorab angelegte fremde App die Mail-Rechte erhalten).
+   Die IDs werden direkt nach dem Anlegen gespeichert, ein abgebrochener Lauf setzt dort fort.
+5. Rücksprung-Adressen werden auf genau die Adresse dieser Installation gesetzt (aus `APP_URL`),
+   nicht ergänzt. Nach dem Speichern des neuen Secrets werden alle anderen Secrets entfernt.
+6. Zugangsdaten verschlüsselt in `settings`, kein `.env`. Handweg: `intake:install --manual`.
+7. Der angemeldete Admin wird nach Rückfrage erster App-Admin (über die `oid`). Ein in der App
+   deaktivierter User wird nicht reaktiviert.
+8. Danach weist der Admin der Enterprise-App die Gruppe zu, der Befehl zeigt den Link.
 
-Admin-Seite «Microsoft 365» danach: Status der App, gewährte Scopes, Ablauf des Secrets,
-verbundene User, Knopf «Secret erneuern» (gleicher Gerätecode-Ablauf, Warnung ab 30 Tage vor
-Ablauf, Mail an alle Admins). Kein Dauerrecht der App auf die eigene Registration.
+Secret erneuern: `php artisan intake:install --renew-secret` (gleicher Gerätecode-Ablauf, neues
+Secret zuerst gespeichert, dann die alten entfernt). Warnung vor Ablauf und eine Admin-Seite
+«Microsoft 365» mit dem Status folgen später. Kein Dauerrecht der App auf die eigene
+Registration.
 
 **Voraussetzung:** Der Gerätecode-Ablauf ist im Tenant nicht per Conditional Access gesperrt.
 Falls doch: für die Einrichtung kurz ausnehmen oder Fallback «App-Registration von Hand» nach

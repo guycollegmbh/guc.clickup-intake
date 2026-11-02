@@ -16,8 +16,10 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * Setup assistant «Mit Microsoft 365 verbinden» (docs/01-decisions.md E1).
@@ -28,7 +30,7 @@ use RuntimeException;
  * admin the first app admin (by object id, never by e-mail).
  */
 #[Signature('intake:install
-    {--renew-secret : Replace the client secret (and add this installation\'s redirect URI)}
+    {--renew-secret : Replace the client secret and set this installation\'s redirect URI}
     {--manual : Enter tenant id, client id and secret of a manually created app registration}
     {--force : Run the setup although the app is already configured}')]
 #[Description('Connect the app to Microsoft 365 (setup assistant)')]
@@ -71,10 +73,23 @@ class Install extends Command
 
         $this->info('Einrichtung ClickUp-Intake: Verbindung mit Microsoft 365');
         $this->line('Nötig ist ein Konto mit der Rolle «Globaler Administrator» oder «Cloudanwendungsadministrator».');
+        $this->line('Bei der Anmeldung «Im Namen der Organisation zustimmen» NICHT ankreuzen.');
         $this->line("Rücksprung-Adresse: {$redirectUri}");
         $this->newLine();
 
         $admin = $this->signInAdmin($deviceCode);
+
+        $configuredTenant = $app->tenantId();
+        if ($configuredTenant !== null && $configuredTenant !== $admin->tenantId) {
+            throw new RuntimeException('Das Admin-Konto gehört zu einem anderen Tenant als die bestehende Einrichtung.');
+        }
+
+        if (! $this->confirm("Im Tenant {$admin->tenantId} die App-Registration «".AppRegistrar::displayName().'» einrichten?', true)) {
+            $this->line('Abgebrochen, nichts geändert.');
+
+            return self::FAILURE;
+        }
+
         $graph = new GraphClient($admin->accessToken);
 
         $registration = $registrar->register(
@@ -82,15 +97,21 @@ class Install extends Command
             tenantId: $admin->tenantId,
             redirectUri: $redirectUri,
             scopes: $app->scopes(),
+            knownAppObjectId: $app->appObjectId(),
+            remember: fn (string $objectId, string $clientId) => $app->rememberApplication($admin->tenantId, $objectId, $clientId),
             log: fn (string $line) => $this->line("  · {$line}"),
         );
 
         $app->store($registration);
+        $this->removeOtherSecrets($registrar, $graph, $registration->clientId, $registration->secretKeyId);
+
         $firstAdmin = $this->makeFirstAdmin($admin);
 
         $this->newLine();
         $this->info('Fertig. Die App ist mit Microsoft 365 verbunden.');
-        $this->line("Erster Admin: {$firstAdmin->name} ({$firstAdmin->mailbox_upn})");
+        if ($firstAdmin !== null) {
+            $this->line("Erster Admin: {$firstAdmin->name} ({$firstAdmin->mailbox_upn})");
+        }
         $this->line('Secret gültig bis: '.$registration->secretExpiresAt->timezone(config('intake.display_timezone'))->format('d.m.Y'));
         $this->newLine();
         $this->line('Nächster Schritt: der Enterprise-App die Gruppe zuweisen (Benutzer und Gruppen, Benutzer/Gruppe hinzufügen).');
@@ -111,6 +132,9 @@ class Install extends Command
             return self::FAILURE;
         }
 
+        $redirectUri = $app->redirectUri();
+        $this->checkRedirectUri($redirectUri);
+
         $this->info('Client-Secret erneuern');
         $admin = $this->signInAdmin($deviceCode);
 
@@ -118,16 +142,15 @@ class Install extends Command
             throw new RuntimeException('Das Admin-Konto gehört zu einem anderen Tenant als die App.');
         }
 
-        $result = $registrar->renewSecret(new GraphClient($admin->accessToken), $clientId, $app->secretKeyId(), $app->redirectUri());
+        $graph = new GraphClient($admin->accessToken);
+        $secret = $registrar->renewSecret($graph, $clientId, $redirectUri);
 
-        $app->storeSecret(
-            $result['secret']['secretText'],
-            $result['secret']['keyId'],
-            CarbonImmutable::parse($result['secret']['endDateTime']),
-        );
-
-        $this->info('Neues Secret gespeichert, das alte ist gelöscht.');
+        // Order matters: store the new secret first, only then remove the old ones.
+        $app->storeSecret($secret['secretText'], $secret['keyId'], CarbonImmutable::parse($secret['endDateTime']));
+        $this->info('Neues Secret gespeichert. Rücksprung-Adresse: '.$redirectUri);
         $this->line('Gültig bis: '.$app->secretExpiresAt()?->timezone(config('intake.display_timezone'))->format('d.m.Y'));
+
+        $this->removeOtherSecrets($registrar, $graph, $clientId, $secret['keyId']);
 
         return self::SUCCESS;
     }
@@ -138,13 +161,19 @@ class Install extends Command
      */
     private function manual(MicrosoftApp $app): int
     {
+        if ($app->isConfigured() && ! $this->option('force')) {
+            $this->warn('Die App ist bereits mit Microsoft 365 verbunden. Überschreiben nur mit --force.');
+
+            return self::FAILURE;
+        }
+
         $this->line('Werte der App-Registration aus dem Entra-Portal (Übersicht und «Zertifikate & Geheimnisse»).');
         $this->line('Rücksprung-Adresse dort eintragen: '.$app->redirectUri());
 
         $tenantId = Str::lower(trim((string) $this->ask('Verzeichnis-ID (Tenant-ID)')));
         $clientId = trim((string) $this->ask('Anwendungs-ID (Client-ID)'));
         $secret = (string) $this->secret('Wert des Client-Secrets');
-        $expires = (string) $this->ask('Secret gültig bis (JJJJ-MM-TT)');
+        $expires = trim((string) $this->ask('Secret gültig bis (JJJJ-MM-TT)'));
 
         if (! Str::isUuid($tenantId) || ! Str::isUuid($clientId) || blank($secret)) {
             $this->error('Tenant-ID und Client-ID müssen GUIDs sein, das Secret darf nicht leer sein.');
@@ -152,9 +181,23 @@ class Install extends Command
             return self::FAILURE;
         }
 
-        Setting::put(MicrosoftApp::SETTING_TENANT_ID, $tenantId);
-        Setting::put(MicrosoftApp::SETTING_CLIENT_ID, $clientId);
-        $app->storeSecret($secret, 'manual', CarbonImmutable::parse($expires));
+        try {
+            $expiresAt = CarbonImmutable::createFromFormat('!Y-m-d', $expires);
+        } catch (Throwable) {
+            $expiresAt = false;
+        }
+
+        if ($expiresAt === false || $expiresAt->isPast()) {
+            $this->error('Das Ablaufdatum muss ein künftiges Datum im Format JJJJ-MM-TT sein.');
+
+            return self::FAILURE;
+        }
+
+        DB::transaction(function () use ($app, $tenantId, $clientId, $secret, $expiresAt): void {
+            Setting::put(MicrosoftApp::SETTING_TENANT_ID, $tenantId);
+            Setting::put(MicrosoftApp::SETTING_CLIENT_ID, $clientId);
+            $app->storeSecret($secret, 'manual', $expiresAt);
+        });
 
         $this->info('Gespeichert. Erster Admin nach dem ersten Login: php artisan intake:make-admin {email}');
 
@@ -174,20 +217,52 @@ class Install extends Command
     }
 
     /**
-     * The admin is matched by object id. Created as admin if unknown, so the first login works
-     * without make-admin.
+     * Old or orphaned secrets (earlier runs, aborted runs) are removed once the new one is stored.
+     * A failure here is not fatal: the app works, the old secrets just stay until the next run.
      */
-    private function makeFirstAdmin(AdminToken $admin): User
+    private function removeOtherSecrets(AppRegistrar $registrar, GraphClient $graph, string $clientId, string $keepKeyId): void
     {
-        $user = User::query()->firstOrNew(['entra_object_id' => $admin->objectId]);
+        try {
+            $removed = $registrar->removeOtherSecrets($graph, $clientId, $keepKeyId);
 
-        if (! $user->exists) {
-            $user->fill([
-                'name' => $admin->name,
-                'email' => $admin->upn,
-                'mailbox_upn' => $admin->upn,
-            ]);
+            if ($removed > 0) {
+                $this->line("  · {$removed} älteres Secret entfernt");
+            }
+        } catch (GraphException $e) {
+            $this->warn('Ältere Secrets konnten nicht entfernt werden ('.$e->status.'). Im Entra-Portal prüfen.');
         }
+    }
+
+    /**
+     * The admin is matched by object id. After confirmation created or promoted to admin, so the
+     * first login works without make-admin. A deactivated user is not silently reactivated.
+     */
+    private function makeFirstAdmin(AdminToken $admin): ?User
+    {
+        $user = User::query()->firstWhere('entra_object_id', $admin->objectId);
+
+        if ($user?->isAdmin()) {
+            return $user;
+        }
+
+        if ($user !== null && ! $user->active) {
+            $this->warn("{$user->name} ist in der App deaktiviert und wird nicht automatisch Admin.");
+
+            return null;
+        }
+
+        if (! $this->confirm("{$admin->name} ({$admin->upn}) wird App-Admin und sieht die Mails aller Benutzer in der Queue. Einverstanden?", true)) {
+            $this->line('Kein Admin gesetzt. Später: php artisan intake:make-admin {email}');
+
+            return null;
+        }
+
+        $user ??= new User([
+            'name' => $admin->name,
+            'email' => $admin->upn,
+            'mailbox_upn' => $admin->upn,
+            'entra_object_id' => $admin->objectId,
+        ]);
 
         $user->role = Role::Admin;
         $user->active = true;

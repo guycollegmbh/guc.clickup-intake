@@ -12,12 +12,16 @@ use RuntimeException;
 /**
  * Creates or updates the Entra app registration with the setup admin's token (E1).
  *
- * Idempotent: a second run finds the app by display name and brings it to the target state, so a
- * run that failed half-way can simply be repeated.
+ * Security rules (review 1b):
+ * - An existing registration is only ever found by the object id this installation stored
+ *   itself, never by display name. Otherwise anyone allowed to register apps could pre-create
+ *   one with their own redirect URI and secret and have it granted tenant-wide mail access.
+ * - Redirect URIs are set to exactly this installation's URI, not merged.
+ * - After a new secret is stored, all other secrets of the registration are removed.
  */
 class AppRegistrar
 {
-    public const DISPLAY_NAME = 'GUYCOLLE ClickUp-Intake';
+    public const BASE_DISPLAY_NAME = 'GUYCOLLE ClickUp-Intake';
 
     public const GRAPH_APP_ID = '00000003-0000-0000-c000-000000000000';
 
@@ -32,36 +36,50 @@ class AppRegistrar
     }
 
     /**
+     * One registration per environment, so a laptop never holds a secret of production.
+     */
+    public static function displayName(): string
+    {
+        $env = app()->environment();
+
+        return $env === 'production' ? self::BASE_DISPLAY_NAME : self::BASE_DISPLAY_NAME." ({$env})";
+    }
+
+    /**
      * @param  list<string>  $scopes  delegated Graph scopes, e.g. Mail.ReadWrite
+     * @param  string|null  $knownAppObjectId  stored by an earlier (possibly aborted) run
+     * @param  Closure(string, string): void  $remember  persists object id and client id right after
+     *                                                   creation, so an aborted run resumes instead of creating a second app
      * @param  (Closure(string): void)|null  $log  progress output
      */
-    public function register(GraphClient $graph, string $tenantId, string $redirectUri, array $scopes, ?Closure $log = null): Registration
-    {
+    public function register(
+        GraphClient $graph,
+        string $tenantId,
+        string $redirectUri,
+        array $scopes,
+        ?string $knownAppObjectId,
+        Closure $remember,
+        ?Closure $log = null,
+    ): Registration {
         $this->log = $log ?? fn (string $line) => null;
 
         $graphSp = $this->graphServicePrincipal($graph);
         $resourceAccess = $this->resourceAccess($graphSp, $scopes);
+        $target = [
+            'signInAudience' => 'AzureADMyOrg',
+            'web' => $this->web($redirectUri),
+            'requiredResourceAccess' => [$resourceAccess],
+        ];
 
-        $app = $this->findApplication($graph);
+        $app = $knownAppObjectId === null ? null : $this->findOwnApplication($graph, $knownAppObjectId);
 
         if ($app === null) {
-            ($this->log)('App-Registration anlegen');
-            $app = $graph->post('applications', [
-                'displayName' => self::DISPLAY_NAME,
-                'signInAudience' => 'AzureADMyOrg',
-                'web' => [
-                    'redirectUris' => [$redirectUri],
-                    'homePageUrl' => rtrim(config('app.url'), '/').'/',
-                ],
-                'requiredResourceAccess' => [$resourceAccess],
-            ]);
+            ($this->log)('App-Registration «'.self::displayName().'» anlegen');
+            $app = $graph->post('applications', ['displayName' => self::displayName(), ...$target]);
+            $remember($app['id'], $app['appId']);
         } else {
-            ($this->log)('Bestehende App-Registration aktualisieren');
-            $redirectUris = array_values(array_unique([...($app['web']['redirectUris'] ?? []), $redirectUri]));
-            $graph->patch("applications/{$app['id']}", [
-                'web' => ['redirectUris' => $redirectUris],
-                'requiredResourceAccess' => [$resourceAccess],
-            ]);
+            ($this->log)('Eigene App-Registration aus früherem Lauf aktualisieren');
+            $graph->patch("applications/{$app['id']}", ['displayName' => self::displayName(), ...$target]);
         }
 
         $sp = $this->ensureServicePrincipal($graph, $app['appId']);
@@ -80,33 +98,68 @@ class AppRegistrar
     }
 
     /**
-     * Adds a new secret and removes the previous one. The redirect URI of this installation is
-     * added if missing (e.g. first setup was local, now production).
+     * Adds a new secret and sets the redirect URI to this installation's. The old secrets are
+     * removed separately with removeOtherSecrets(), after the new one is stored.
      *
-     * @return array{secret: array<string, mixed>, app: array<string, mixed>}
+     * @return array<string, mixed> the new password credential incl. secretText
      */
-    public function renewSecret(GraphClient $graph, string $clientId, ?string $oldKeyId, string $redirectUri): array
+    public function renewSecret(GraphClient $graph, string $clientId, string $redirectUri): array
     {
-        $this->log = fn (string $line) => null;
+        $app = $graph->get("applications(appId='{$clientId}')", ['$select' => 'id,appId']);
+        $graph->patch("applications/{$app['id']}", ['web' => $this->web($redirectUri)]);
 
-        $app = $graph->get("applications(appId='{$clientId}')", ['$select' => 'id,appId,web']);
+        return $this->addSecret($graph, $app['id']);
+    }
 
-        $redirectUris = array_values(array_unique([...($app['web']['redirectUris'] ?? []), $redirectUri]));
-        $graph->patch("applications/{$app['id']}", ['web' => ['redirectUris' => $redirectUris]]);
+    /**
+     * Removes every secret except the one in use. Called only after the new secret is stored, so
+     * an abort never leaves the installation with a secret that no longer exists in Entra.
+     *
+     * @return int number of removed secrets
+     */
+    public function removeOtherSecrets(GraphClient $graph, string $clientId, string $keepKeyId): int
+    {
+        $app = $graph->get("applications(appId='{$clientId}')", ['$select' => 'id,passwordCredentials']);
+        $removed = 0;
 
-        $secret = $this->addSecret($graph, $app['id']);
-
-        if ($oldKeyId !== null) {
-            try {
-                $graph->post("applications/{$app['id']}/removePassword", ['keyId' => $oldKeyId]);
-            } catch (GraphException $e) {
-                if (! $e->isNotFound() && $e->status !== 400) {
-                    throw $e;
-                }
+        foreach ($app['passwordCredentials'] ?? [] as $credential) {
+            if ($credential['keyId'] === $keepKeyId) {
+                continue;
             }
+
+            $graph->post("applications/{$app['id']}/removePassword", ['keyId' => $credential['keyId']]);
+            $removed++;
         }
 
-        return ['secret' => $secret, 'app' => $app];
+        return $removed;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function web(string $redirectUri): array
+    {
+        // `web` is replaced as a whole by PATCH, so it is always sent complete.
+        return [
+            'redirectUris' => [$redirectUri],
+            'homePageUrl' => rtrim((string) config('app.url'), '/').'/',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findOwnApplication(GraphClient $graph, string $appObjectId): ?array
+    {
+        try {
+            return $graph->get("applications/{$appObjectId}", ['$select' => 'id,appId']);
+        } catch (GraphException $e) {
+            if ($e->isNotFound()) {
+                return null; // deleted in the portal meanwhile: create a new one
+            }
+
+            throw $e;
+        }
     }
 
     /**
@@ -143,33 +196,13 @@ class AppRegistrar
     }
 
     /**
-     * @return array<string, mixed>|null
-     */
-    private function findApplication(GraphClient $graph): ?array
-    {
-        $apps = $graph->get('applications', [
-            '$filter' => "displayName eq '".self::DISPLAY_NAME."'",
-            '$select' => 'id,appId,web',
-        ])['value'] ?? [];
-
-        if (count($apps) > 1) {
-            throw new RuntimeException('Es gibt mehrere App-Registrations «'.self::DISPLAY_NAME.'». Bitte überzählige im Entra-Portal löschen.');
-        }
-
-        return $apps[0] ?? null;
-    }
-
-    /**
      * «Zuweisung erforderlich»: only users or groups assigned to the enterprise app can sign in (E3).
      *
      * @return array<string, mixed>
      */
     private function ensureServicePrincipal(GraphClient $graph, string $appId): array
     {
-        $existing = $graph->get('servicePrincipals', [
-            '$filter' => "appId eq '{$appId}'",
-            '$select' => 'id,appId',
-        ])['value'][0] ?? null;
+        $existing = $this->findServicePrincipal($graph, $appId);
 
         if ($existing !== null) {
             $graph->patch("servicePrincipals/{$existing['id']}", ['appRoleAssignmentRequired' => true]);
@@ -185,6 +218,17 @@ class AppRegistrar
             'appRoleAssignmentRequired' => true,
             'tags' => ['WindowsAzureActiveDirectoryIntegratedApp'],
         ]));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findServicePrincipal(GraphClient $graph, string $appId): ?array
+    {
+        return $graph->get('servicePrincipals', [
+            '$filter' => "appId eq '{$appId}'",
+            '$select' => 'id,appId',
+        ])['value'][0] ?? null;
     }
 
     /**
@@ -232,7 +276,8 @@ class AppRegistrar
     }
 
     /**
-     * Entra is eventually consistent: objects created a second ago may answer 400 or 404.
+     * Entra is eventually consistent: objects created a second ago may answer 404 or a generic
+     * 400. Other errors fail immediately.
      *
      * @template T
      *
@@ -245,7 +290,10 @@ class AppRegistrar
             try {
                 return $call();
             } catch (GraphException $e) {
-                if ($attempt >= 6 || ! in_array($e->status, [400, 404], true)) {
+                $replicating = $e->status === 404
+                    || ($e->status === 400 && in_array($e->graphCode, ['Request_BadRequest', 'Request_ResourceNotFound'], true));
+
+                if ($attempt >= 4 || ! $replicating) {
                     throw $e;
                 }
 

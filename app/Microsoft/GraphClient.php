@@ -12,7 +12,9 @@ use SensitiveParameter;
  * The only way to call Microsoft Graph (R4).
  *
  * Always bound to one delegated access token: the admin's during setup, a user's for that
- * user's mailbox (E1, E6). Retries 429, 503 and 504 honouring Retry-After.
+ * user's mailbox (E1, E6). Retries 429 honouring Retry-After. 503 and 504 are retried only for
+ * reads and updates: a POST may have been executed despite the error, and repeating it could
+ * create a second object or secret.
  */
 class GraphClient
 {
@@ -64,7 +66,7 @@ class GraphClient
                 return $response->json() ?? [];
             }
 
-            if ($attempt < self::MAX_ATTEMPTS && in_array($response->status(), [429, 503, 504], true)) {
+            if ($attempt < self::MAX_ATTEMPTS && $this->isRetryable($method, $response->status())) {
                 Sleep::for($this->retryAfter($response, $attempt))->seconds();
 
                 continue;
@@ -87,6 +89,11 @@ class GraphClient
         } catch (ConnectionException) {
             throw new GraphException(0, 'connection_failed', $method, $path);
         }
+    }
+
+    private function isRetryable(string $method, int $status): bool
+    {
+        return $status === 429 || ($method !== 'POST' && in_array($status, [503, 504], true));
     }
 
     private function retryAfter(Response $response, int $attempt): int

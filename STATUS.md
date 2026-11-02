@@ -6,7 +6,7 @@ Stand 2026-11-02, Branch `develop`.
 |---|---|---|
 | 0 | Konzept-Check, `docs/01-decisions.md` | erledigt, freigegeben |
 | 1 | Scaffold, Theme, Microsoft-Login, CI | erledigt |
-| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | Code fertig, Test gegen Tenant offen |
+| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, Einrichtung im Tenant ok, Login-Test offen |
 | 2 | Datenmodell Intake | offen |
 | 3 | Intake über Graph | offen |
 | 4 | Triage in Filament | offen |
@@ -57,7 +57,20 @@ Code, Security und Architektur: keine kritischen oder hohen Befunde. Behoben:
   Wiederholung bei Replikationsverzögerung).
 - `php artisan intake:install [--renew-secret|--manual|--force]`. Erster Admin über die `oid`.
 - Rücksprung-Adresse immer aus `APP_URL` (nicht aus dem Host-Header).
-- 39 Tests grün.
+- Reviews 1b (Code, Security): behoben
+  - keine Übernahme einer App über den Namen, nur über die gespeicherte Objekt-ID (hoch)
+  - Secret-Erneuerung: erst speichern, dann alte entfernen, verwaiste Secrets werden entfernt (hoch)
+  - Redirect-URIs ersetzen statt ergänzen, `web` vollständig, eine Registration je Umgebung
+  - POST bei 503/504 nicht wiederholen, Replikations-Retry nur für passende Fehler
+  - Tenant- und Admin-Bestätigung, kein Reaktivieren deaktivierter User
+  - `--manual` prüft Datum und überschreibt nur mit `--force`
+  - Gerätecode-Polling übersteht vorübergehende Fehler
+  - Tests für Graph-Client und Gerätecode-Ablauf
+- 63 Tests grün.
+- Lauf gegen den Tenant am 2026-11-02 (lokal, `http://localhost:8000`): App-Registration,
+  Enterprise-App, Zustimmung und Secret angelegt, erster Admin gesetzt. Die Registration heisst
+  noch «GUYCOLLE ClickUp-Intake» ohne Suffix (vor der Namensregel angelegt), sie wird beim nächsten
+  `--force`-Lauf zu «(local)».
 
 ## Offen und bekannt
 

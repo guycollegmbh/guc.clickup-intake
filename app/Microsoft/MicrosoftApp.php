@@ -63,6 +63,24 @@ class MicrosoftApp
         return $value === null ? null : CarbonImmutable::parse($value);
     }
 
+    public function appObjectId(): ?string
+    {
+        return $this->read(self::SETTING_APP_OBJECT_ID);
+    }
+
+    /**
+     * Stored right after the registration is created, before anything else can fail, so a rerun
+     * finds its own app by object id instead of creating a second one.
+     */
+    public function rememberApplication(string $tenantId, string $appObjectId, string $clientId): void
+    {
+        DB::transaction(function () use ($tenantId, $appObjectId, $clientId): void {
+            Setting::put(self::SETTING_TENANT_ID, $tenantId);
+            Setting::put(self::SETTING_APP_OBJECT_ID, $appObjectId);
+            Setting::put(self::SETTING_CLIENT_ID, $clientId);
+        });
+    }
+
     public function servicePrincipalId(): ?string
     {
         return $this->read(self::SETTING_SERVICE_PRINCIPAL_ID);
