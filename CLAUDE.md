@@ -21,8 +21,9 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 ## Struktur
 
 - `app/Microsoft/`: Entra-App (`MicrosoftApp`, Zugangsdaten nur aus `settings`, kein `.env`),
-  Login (`MicrosoftLogin`). Ab 1b: Graph-Client (ein Client für Setup und Poll) und
-  Token-Erneuerung je User an genau einer Stelle.
+  Login (`MicrosoftLogin`), `GraphClient` (einziger Graph-Zugang, an ein Token gebunden),
+  `Setup/` (Gerätecode, App-Registration). Token-Erneuerung je User folgt in Schritt 3, an genau
+  einer Stelle.
 - `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
 - `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.
@@ -35,6 +36,13 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 - Kein «Angemeldet bleiben», Sitzung 8 Stunden (`SESSION_LIFETIME=480`).
 - Hinter Caddy: `trustProxies` für `127.0.0.1` in `bootstrap/app.php`.
 - Notweg: `php artisan intake:make-admin {email}` oder `--oid=`, bricht bei Mehrdeutigkeit ab.
+
+## Einrichtung Microsoft 365
+
+`php artisan intake:install`: ein M365-Admin meldet sich per Gerätecode an, der Befehl legt
+App-Registration, Enterprise-App (Zuweisung erforderlich) und Admin-Zustimmung an, speichert alles
+verschlüsselt in `settings` und macht den Admin zum ersten App-Admin. Danach Gruppe im
+Entra-Portal zuweisen. `--renew-secret`, `--manual`, `--force`. Rücksprung-Adresse aus `APP_URL`.
 
 ## Lokal
 

@@ -72,15 +72,24 @@ it('signs the user in after a valid callback', function () {
     $this->get('/')->assertOk();
 });
 
-it('builds an https redirect URI behind the local reverse proxy', function () {
+it('takes the redirect URI from APP_URL, not from the Host header', function () {
     configureMicrosoftApp();
+    config(['app.url' => 'https://intake.guycolle.services']);
 
-    $location = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
-        ->withHeaders(['X-Forwarded-Proto' => 'https', 'X-Forwarded-Host' => 'intake.guycolle.services'])
+    $location = $this->withHeaders(['Host' => 'evil.example', 'X-Forwarded-Host' => 'evil.example'])
         ->get(route('auth.microsoft.redirect'))
         ->headers->get('Location');
 
-    expect(urldecode($location))->toContain('redirect_uri=https://intake.guycolle.services/auth/microsoft/callback');
+    expect(urldecode($location))->toContain('redirect_uri=https://intake.guycolle.services/auth/microsoft/callback')
+        ->not->toContain('evil.example');
+});
+
+it('trusts the local reverse proxy for the scheme', function () {
+    $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
+        ->withHeaders(['X-Forwarded-Proto' => 'https'])
+        ->get(route('login'));
+
+    expect(request()->isSecure())->toBeTrue();
 });
 
 it('does not set a remember-me cookie', function () {

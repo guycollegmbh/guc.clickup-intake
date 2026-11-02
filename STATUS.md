@@ -6,7 +6,7 @@ Stand 2026-11-02, Branch `develop`.
 |---|---|---|
 | 0 | Konzept-Check, `docs/01-decisions.md` | erledigt, freigegeben |
 | 1 | Scaffold, Theme, Microsoft-Login, CI | erledigt |
-| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | offen |
+| 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | Code fertig, Test gegen Tenant offen |
 | 2 | Datenmodell Intake | offen |
 | 3 | Intake über Graph | offen |
 | 4 | Triage in Filament | offen |
@@ -47,8 +47,21 @@ Code, Security und Architektur: keine kritischen oder hohen Befunde. Behoben:
 - Erster Admin über die `oid` aus dem Admin-Token, nie über die E-Mail.
 - Handweg `intake:install --manual` schreibt ebenfalls in `settings`.
 
+## Schritt 1b
+
+- `app/Microsoft/GraphClient.php`: einziger Graph-Zugang (R4), an ein Token gebunden, Retry bei
+  429, 503, 504 mit `Retry-After`. `GraphException` ohne Antworttext.
+- `app/Microsoft/Setup/`: Gerätecode-Anmeldung (öffentlicher Client «Microsoft Graph Command
+  Line Tools», Token nicht gespeichert), `AppRegistrar` (App-Registration, Enterprise-App mit
+  Zuweisung erforderlich, Admin-Zustimmung `AllPrincipals`, Secret 24 Monate, idempotent,
+  Wiederholung bei Replikationsverzögerung).
+- `php artisan intake:install [--renew-secret|--manual|--force]`. Erster Admin über die `oid`.
+- Rücksprung-Adresse immer aus `APP_URL` (nicht aus dem Host-Header).
+- 39 Tests grün.
+
 ## Offen und bekannt
 
-- Ohne Setup-Assistent (1b) ist kein Login möglich.
+- Erster Lauf gegen den echten Tenant steht aus.
+- Warnung vor Ablauf des Secrets und Admin-Seite «Microsoft 365» folgen mit Schritt 4 bzw. 7.
 - Im Browser noch nicht gegen einen echten Tenant geprüft.
 - `.env.production.example` bzw. Deploy-Checkliste folgt in Schritt 7 (`docs/02-setup.md`).

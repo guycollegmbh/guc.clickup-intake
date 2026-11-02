@@ -50,6 +50,13 @@ Zustimmungsabfrage für die User):
 
 ### Setup-Assistent («Mit Microsoft 365 verbinden»)
 
+**Umsetzung 1b (2026-11-02, zur Bestätigung):** Der Assistent ist ein interaktiver Befehl
+`php artisan intake:install` statt einer Webseite `/setup`. Ablauf für den Admin gleich
+(Gerätecode), aber keine unauthentisierte Einrichtungs-Route und weniger Code. Weitere Optionen:
+`--renew-secret` (neues Secret, altes gelöscht, Rücksprung-Adresse dieser Installation ergänzt),
+`--manual` (Handweg), `--force`. Der Lauf ist idempotent und kann nach einem Abbruch wiederholt
+werden. Rücksprung-Adresse immer aus `APP_URL`. Die Punkte unten gelten sinngemäss.
+
 1. `php artisan intake:install` auf dem Server gibt einen einmaligen Setup-Link aus. `/setup` ist
    nur erreichbar, solange die App nicht eingerichtet ist, und nur mit diesem Link.
 2. Der Admin meldet sich im Assistenten per Gerätecode an (microsoft.com/devicelogin) über den

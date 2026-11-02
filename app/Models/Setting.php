@@ -24,7 +24,7 @@ class Setting extends Model
         return static::query()->where('key', $key)->first()?->value ?? $default;
     }
 
-    public static function put(string $key, ?string $value): void
+    public static function put(string $key, #[\SensitiveParameter] ?string $value): void
     {
         static::query()->updateOrCreate(['key' => $key], ['value' => $value]);
     }
