@@ -33,7 +33,8 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // No signed /storage route: attachments are served only by policy-checked routes (R12).
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

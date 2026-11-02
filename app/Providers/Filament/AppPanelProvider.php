@@ -61,6 +61,8 @@ class AppPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            // Every resource needs a policy with every ability Filament asks for (R12).
+            ->strictAuthorization();
     }
 }

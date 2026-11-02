@@ -11,6 +11,10 @@ return [
 
     'retention_days' => 30,
 
+    // Finished items whose Outlook category never synced are deleted after this many days
+    // anyway (docs/01-decisions.md E7).
+    'retention_hard_limit_days' => 60,
+
     'microsoft' => [
         // Tenant, client id and secret are not configured here: the setup assistant stores them
         // encrypted in `settings` (docs/01-decisions.md E1, R11c).

@@ -4,7 +4,7 @@ Internes Tool der GUYCOLLE GmbH. Outlook-Mails mit der Kategorie «ClickUp» wer
 Graph in eine Triage-Queue geholt und dort zu ClickUp-Tasks.
 
 - Spezifikation: `docs/AGENT_PROMPT.md`
-- Entscheide: `docs/01-decisions.md` (E1 bis E6, gehen der Spezifikation vor)
+- Entscheide: `docs/01-decisions.md` (E1 bis E7, gehen der Spezifikation vor)
 - Harte Regeln: `.claude/rules/intake.md`
 - Arbeitsstand: `STATUS.md`
 
@@ -24,6 +24,9 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
   Login (`MicrosoftLogin`), `GraphClient` (einziger Graph-Zugang, an ein Token gebunden),
   `Setup/` (Gerätecode, App-Registration). Token-Erneuerung je User folgt in Schritt 3, an genau
   einer Stelle.
+- `app/Intake/`: `AttachmentStore` (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf
+  Disk `local`), `Retention`. Commands `intake:prune` (Scheduler, täglich) und `intake:orphans`.
+- `app/Policies/`: Items (member eigene, admin alle), Regeln (nur admin).
 - `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
 - `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.

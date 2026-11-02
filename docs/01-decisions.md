@@ -163,6 +163,39 @@ Ersetzt die entsprechenden Stellen in Schritt 2 und 3 der Spezifikation.
 
 ---
 
+## E7: Datenmodell-Details nach Review Schritt 2 (2026-11-02)
+
+Aus den Reviews zu Schritt 2. Ergänzt Schritt 2 und 3 der Spezifikation.
+
+- **`imported_at`** am Item: gesetzt erst, wenn Item und alle Anhänge vollständig importiert sind.
+  Die Triage zeigt nur Items mit `imported_at` (Scope `imported()`). Halbe Importe bleiben
+  unsichtbar und werden in Schritt 3 neu importiert.
+- **Anhänge:** `error` nur für Fehler bei der Ablage. Für ClickUp `selected_for_upload` (Auswahl in
+  der Triage) und `upload_error`. Eindeutiger Index `(intake_item_id, graph_attachment_id)`.
+- **Kategorie-Vertrag:** Jeder Statuswechsel setzt `outlook_category_synced_at` auf null. Gesetzt
+  wird es erst nach erfolgreichem Kategorie-Update. Die Stelle dafür entsteht in Schritt 3.
+- **Retention-Obergrenze:** Erledigte Items ohne synchronisierte Kategorie gelten nach 30 Tagen als
+  hängend (`intake:prune` meldet sie und endet mit Fehler). Nach 60 Tagen
+  (`intake.retention_hard_limit_days`) werden sie trotzdem gelöscht, mit Log-Eintrag nur mit
+  Item- und User-ID. **Zur Bestätigung durch den Inhaber.**
+- **referenceAttachment** (Variante a): nur Name als Zeile ohne Datei, in der Triage mit Hinweis
+  «Link in der Original-Mail». Keine Spalte für die URL, kein Beta-Endpunkt.
+- **Fehlende `internetMessageId`:** Ersatzschlüssel wird in Schritt 3 festgelegt. Vorschlag
+  `graph:{immutableId}` (Graph mit `Prefer: IdType="ImmutableId"`).
+- **Verhalten des Polls bei Dedupe-Treffer** (umgesetzt in Schritt 3):
+
+| Bestehendes Item | Verhalten |
+|---|---|
+| `discarded`, Kategorie synchronisiert (erneut markiert) | zurück auf `pending` (Runde 1, Punkt 6) |
+| `discarded` oder `created` ohne synchronisierte Kategorie | Kategorie erneut setzen |
+| `failed` ohne `clickup_task_id` | Import wiederholen |
+| alle anderen | nichts |
+
+- **Security-Hinweis für Schritt 3:** Eine gleiche Message-ID mit abweichender Mail (z. B. anderer
+  Absender oder Betreff) wird nicht still übersprungen, sondern sichtbar gemacht.
+
+---
+
 ## Weitere Punkte aus Runde 1
 
 | # | Punkt | Stand |
