@@ -69,7 +69,9 @@ class MicrosoftLoginController extends Controller
             return $this->fail($e->getMessage());
         }
 
-        Auth::login($user, remember: true);
+        // No "remember me": access must end with the session (SESSION_LIFETIME), so that removing
+        // someone from the Entra group or blocking the account takes effect within a working day.
+        Auth::login($user);
         $request->session()->regenerate();
 
         return redirect()->intended('/');

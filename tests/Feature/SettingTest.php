@@ -10,12 +10,21 @@ it('stores values encrypted', function () {
         ->and(DB::table('settings')->value('value'))->not->toContain('top-secret');
 });
 
-it('prefers stored settings over the env fallback', function () {
-    config(['intake.microsoft.client_id' => 'from-env']);
+it('is only configured with all three values and a tenant GUID', function () {
+    $app = app(MicrosoftApp::class);
+    expect($app->isConfigured())->toBeFalse();
 
-    expect(app(MicrosoftApp::class)->clientId())->toBe('from-env');
+    configureMicrosoftApp();
+    expect($app->isConfigured())->toBeTrue();
 
-    Setting::put(MicrosoftApp::SETTING_CLIENT_ID, 'from-setup');
+    Setting::put(MicrosoftApp::SETTING_TENANT_ID, 'guycolle.ch');
+    expect($app->isConfigured())->toBeFalse();
+});
 
-    expect(app(MicrosoftApp::class)->clientId())->toBe('from-setup');
+it('treats undecryptable settings as missing instead of failing', function () {
+    configureMicrosoftApp();
+    DB::table('settings')->where('key', MicrosoftApp::SETTING_CLIENT_SECRET)->update(['value' => 'garbage']);
+
+    expect(app(MicrosoftApp::class)->isConfigured())->toBeFalse();
+    $this->get(route('login'))->assertOk()->assertSee('php artisan intake:install');
 });

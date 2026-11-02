@@ -3,12 +3,16 @@
 namespace App\Microsoft;
 
 use App\Models\Setting;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Credentials of the Entra app registration.
  *
- * Source of truth is the encrypted `settings` table, written by the setup assistant.
- * config('intake.microsoft.*') is the fallback for a manual registration.
+ * Only source is the encrypted `settings` table, written by the setup assistant (E1, R11c).
+ * There is deliberately no .env fallback, so a configuration is never half from one place and
+ * half from another.
  */
 class MicrosoftApp
 {
@@ -20,22 +24,29 @@ class MicrosoftApp
 
     public function tenantId(): ?string
     {
-        return Setting::get(self::SETTING_TENANT_ID, config('intake.microsoft.tenant_id'));
+        $tenantId = $this->read(self::SETTING_TENANT_ID);
+
+        return $tenantId === null ? null : Str::lower($tenantId);
     }
 
     public function clientId(): ?string
     {
-        return Setting::get(self::SETTING_CLIENT_ID, config('intake.microsoft.client_id'));
+        return $this->read(self::SETTING_CLIENT_ID);
     }
 
     public function clientSecret(): ?string
     {
-        return Setting::get(self::SETTING_CLIENT_SECRET, config('intake.microsoft.client_secret'));
+        return $this->read(self::SETTING_CLIENT_SECRET);
     }
 
+    /**
+     * The tenant must be the GUID: it is compared with the `tid` claim, which is never a domain.
+     */
     public function isConfigured(): bool
     {
-        return filled($this->tenantId()) && filled($this->clientId()) && filled($this->clientSecret());
+        return Str::isUuid((string) $this->tenantId())
+            && filled($this->clientId())
+            && filled($this->clientSecret());
     }
 
     /**
@@ -52,7 +63,8 @@ class MicrosoftApp
     }
 
     /**
-     * Socialite reads provider config from config('services.azure'), so it is set per request.
+     * Socialite reads provider config from config('services.azure'). Only used in web requests
+     * (login), never in queue workers.
      */
     public function configureSocialite(): void
     {
@@ -62,5 +74,20 @@ class MicrosoftApp
             'redirect' => $this->redirectUri(),
             'tenant' => $this->tenantId(),
         ]]);
+    }
+
+    /**
+     * A value that cannot be decrypted (APP_KEY changed, e.g. after a restore on a new host)
+     * counts as missing: the login page then asks for the setup instead of failing with 500.
+     */
+    private function read(string $key): ?string
+    {
+        try {
+            return Setting::get($key);
+        } catch (DecryptException) {
+            Log::warning('Microsoft setting cannot be decrypted, APP_KEY changed?', ['key' => $key]);
+
+            return null;
+        }
     }
 }

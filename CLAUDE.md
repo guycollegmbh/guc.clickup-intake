@@ -4,7 +4,7 @@ Internes Tool der GUYCOLLE GmbH. Outlook-Mails mit der Kategorie «ClickUp» wer
 Graph in eine Triage-Queue geholt und dort zu ClickUp-Tasks.
 
 - Spezifikation: `docs/AGENT_PROMPT.md`
-- Entscheide: `docs/01-decisions.md` (freigegeben, gehen der Spezifikation vor)
+- Entscheide: `docs/01-decisions.md` (E1 bis E6, gehen der Spezifikation vor)
 - Harte Regeln: `.claude/rules/intake.md`
 - Arbeitsstand: `STATUS.md`
 
@@ -20,8 +20,10 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 
 ## Struktur
 
-- `app/Microsoft/`: Entra-App (`MicrosoftApp`, Zugangsdaten aus `settings`, Fallback `.env`),
-  Login (`MicrosoftLogin`). Graph-Client folgt in Schritt 3.
+- `app/Microsoft/`: Entra-App (`MicrosoftApp`, Zugangsdaten nur aus `settings`, kein `.env`),
+  Login (`MicrosoftLogin`). Ab 1b: Graph-Client (ein Client für Setup und Poll) und
+  Token-Erneuerung je User an genau einer Stelle.
+- `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
 - `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.
 
@@ -30,7 +32,9 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 - Nur Microsoft (Socialite `azure`, Single-Tenant). Kein Passwort. Routen in `routes/web.php`.
 - Zugang steuert Entra: Enterprise-App mit «Zuweisung erforderlich», Gruppe zugewiesen.
 - User per `entra_object_id`, `tid` geprüft. `role` und `active` nicht mass-assignable.
-- Notweg: `php artisan intake:make-admin {email}`.
+- Kein «Angemeldet bleiben», Sitzung 8 Stunden (`SESSION_LIFETIME=480`).
+- Hinter Caddy: `trustProxies` für `127.0.0.1` in `bootstrap/app.php`.
+- Notweg: `php artisan intake:make-admin {email}` oder `--oid=`, bricht bei Mehrdeutigkeit ab.
 
 ## Lokal
 
@@ -59,9 +63,11 @@ Details folgen in `docs/02-setup.md` (Schritt 7).
 
 ## Agenten (`.claude/agents/`)
 
+Werden erst nach einem Neustart der Claude-Code-Session als `subagent_type` erkannt.
+
 Umsetzung:
 
-- `fullstack-developer`: Code und Tests für die Schritte 2 bis 6 und Befunde. Committet nicht.
+- `fullstack-developer`: Code und Tests für die Schritte 1b bis 6 und Befunde. Committet nicht.
 - `devops-engineer`: Commits, Pull Requests, CI, `docs/02-setup.md`. Nie direkt auf dem Server,
   Deploy nur auf ausdrückliche Anweisung.
 

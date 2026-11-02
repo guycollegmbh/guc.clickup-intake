@@ -18,7 +18,7 @@ use Illuminate\Notifications\Notifiable;
  * the setup assistant and admins in the panel change them explicitly.
  */
 #[Fillable(['name', 'email', 'entra_object_id', 'mailbox_upn'])]
-#[Hidden(['remember_token', 'ms_refresh_token', 'clickup_token'])]
+#[Hidden(['remember_token', 'ms_refresh_token', 'ms_access_token', 'clickup_token'])]
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<UserFactory> */
@@ -30,6 +30,8 @@ class User extends Authenticatable implements FilamentUser
             'role' => Role::class,
             'active' => 'boolean',
             'ms_refresh_token' => 'encrypted',
+            'ms_access_token' => 'encrypted',
+            'ms_token_expires_at' => 'datetime',
             'ms_connection_status' => ConnectionStatus::class,
             'ms_connected_at' => 'datetime',
             'clickup_token' => 'encrypted',

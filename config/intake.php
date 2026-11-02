@@ -12,10 +12,8 @@ return [
     'retention_days' => 30,
 
     'microsoft' => [
-        // Fallback for a manual app registration. The setup assistant stores these in `settings`.
-        'tenant_id' => env('MICROSOFT_TENANT_ID'),
-        'client_id' => env('MICROSOFT_CLIENT_ID'),
-        'client_secret' => env('MICROSOFT_CLIENT_SECRET'),
+        // Tenant, client id and secret are not configured here: the setup assistant stores them
+        // encrypted in `settings` (docs/01-decisions.md E1, R11c).
 
         // Delegated scopes, granted once by admin consent for all users (docs/01-decisions.md E1).
         'scopes' => [

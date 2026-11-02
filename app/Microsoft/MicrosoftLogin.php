@@ -5,6 +5,9 @@ namespace App\Microsoft;
 use App\Enums\ConnectionStatus;
 use App\Enums\Role;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Str;
+use SensitiveParameter;
 
 /**
  * Turns a successful Entra sign-in into a local user.
@@ -20,11 +23,16 @@ class MicrosoftLogin
     /**
      * @param  array<string, mixed>  $claims  ID token claims
      */
-    public function handle(array $claims, string $name, string $upn, ?string $mail, ?string $refreshToken): User
-    {
+    public function handle(
+        array $claims,
+        string $name,
+        string $upn,
+        ?string $mail,
+        #[SensitiveParameter] ?string $refreshToken,
+    ): User {
         $tenantId = $this->app->tenantId();
 
-        if (blank($tenantId) || ($claims['tid'] ?? null) !== $tenantId) {
+        if (blank($tenantId) || Str::lower((string) ($claims['tid'] ?? '')) !== $tenantId) {
             throw new LoginRejected('Diese Anmeldung gehört nicht zum GUYCOLLE-Tenant.');
         }
 
@@ -34,6 +42,22 @@ class MicrosoftLogin
             throw new LoginRejected('Microsoft hat keine Benutzerkennung geliefert.');
         }
 
+        try {
+            return $this->upsert($objectId, $name, $upn, $mail, $refreshToken);
+        } catch (UniqueConstraintViolationException) {
+            // Two parallel first sign-ins (double click, two tabs): the other request created the
+            // row in the meantime. A second pass finds and updates it.
+            return $this->upsert($objectId, $name, $upn, $mail, $refreshToken);
+        }
+    }
+
+    private function upsert(
+        string $objectId,
+        string $name,
+        string $upn,
+        ?string $mail,
+        #[SensitiveParameter] ?string $refreshToken,
+    ): User {
         $user = User::query()->firstOrNew(['entra_object_id' => $objectId]);
 
         if ($user->exists && ! $user->active) {
@@ -54,6 +78,8 @@ class MicrosoftLogin
         // Without a refresh token the background poll cannot run for this user.
         if (filled($refreshToken)) {
             $user->ms_refresh_token = $refreshToken;
+            $user->ms_access_token = null;
+            $user->ms_token_expires_at = null;
             $user->ms_connection_status = ConnectionStatus::Connected;
             $user->ms_connected_at = now();
         }

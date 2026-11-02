@@ -18,7 +18,10 @@ return new class extends Migration
             $table->boolean('active')->default(true);
 
             // Microsoft 365 (delegated, see docs/01-decisions.md E1).
+            // Refreshed in exactly one place (app/Microsoft), see CLAUDE.md.
             $table->text('ms_refresh_token')->nullable();
+            $table->text('ms_access_token')->nullable();
+            $table->timestamp('ms_token_expires_at')->nullable();
             $table->string('ms_connection_status')->default('disconnected');
             $table->timestamp('ms_connected_at')->nullable();
 

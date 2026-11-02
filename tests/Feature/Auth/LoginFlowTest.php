@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\InvalidStateException;
 use SocialiteProviders\Azure\User as SocialiteUser;
 
 function fakeSocialiteUser(array $claims): SocialiteUser
@@ -69,6 +70,54 @@ it('signs the user in after a valid callback', function () {
 
     $this->assertAuthenticatedAs(User::firstWhere('entra_object_id', 'oid-anna'));
     $this->get('/')->assertOk();
+});
+
+it('builds an https redirect URI behind the local reverse proxy', function () {
+    configureMicrosoftApp();
+
+    $location = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1'])
+        ->withHeaders(['X-Forwarded-Proto' => 'https', 'X-Forwarded-Host' => 'intake.guycolle.services'])
+        ->get(route('auth.microsoft.redirect'))
+        ->headers->get('Location');
+
+    expect(urldecode($location))->toContain('redirect_uri=https://intake.guycolle.services/auth/microsoft/callback');
+});
+
+it('does not set a remember-me cookie', function () {
+    configureMicrosoftApp();
+    mockSocialiteCallback(fakeSocialiteUser(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']));
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))
+        ->assertCookieMissing(Auth::guard()->getRecallerName());
+});
+
+it('handles an expired login state', function () {
+    configureMicrosoftApp();
+    $driver = Mockery::mock();
+    $driver->shouldReceive('user')->andThrow(new InvalidStateException);
+    Socialite::shouldReceive('driver')->with('azure')->andReturn($driver);
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))
+        ->assertRedirect(route('login'))
+        ->assertSessionHas('login_error');
+
+    $this->assertGuest();
+});
+
+it('does not log details of a failed token exchange', function () {
+    configureMicrosoftApp();
+    Log::spy();
+    $driver = Mockery::mock();
+    $driver->shouldReceive('user')->andThrow(new RuntimeException('response contained secret-token-123'));
+    Socialite::shouldReceive('driver')->with('azure')->andReturn($driver);
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))
+        ->assertRedirect(route('login'));
+
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => ! str_contains(json_encode($context).$message, 'secret-token-123'),
+    );
+    $this->assertGuest();
 });
 
 it('refuses a callback from another tenant', function () {

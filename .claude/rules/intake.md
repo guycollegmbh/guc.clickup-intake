@@ -15,8 +15,9 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
 
 ## Zugangspunkte
 
-- **R4 Ein Client je Dienst.** Microsoft Graph nur über den Graph-Client, ClickUp nur über den
-  ClickUp-Client (`app/Services/...`). Kein `Http::` und kein SDK-Aufruf daneben. Retry, Backoff
+- **R4 Ein Client je Dienst.** Microsoft Graph nur über den Graph-Client in `app/Microsoft/`,
+  ClickUp nur über den ClickUp-Client in `app/ClickUp/`. Auch der Setup-Assistent nutzt den
+  Graph-Client (mit dem Admin-Token). Token-Erneuerung je Dienst an genau einer Stelle. Kein `Http::` und kein SDK-Aufruf daneben. Retry, Backoff
   (`Retry-After` bei 429 und 503) und das ClickUp-Limit (100 Requests pro Minute pro Token) liegen
   ausschliesslich in diesen Clients.
 - **R5 Streamen statt laden.** Attachment-Inhalte von Graph werden gestreamt auf Disk geschrieben,
@@ -26,7 +27,7 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
 
 - **R6 Keine Mail verschwindet stillschweigend.** Jeder Fehler im Import oder in der Verarbeitung
   endet in Status `failed` mit Fehlertext. `failed` und `pending` werden nie automatisch gelöscht.
-- **R7 Dedupe** über `(mailbox_upn, internet_message_id)` mit eindeutigem Index.
+- **R7 Dedupe** über `(user_id, internet_message_id)` mit eindeutigem Index (E6). Graph über `/me`.
   `graph_message_id` ist veränderlich (Move) und nur Referenz, nie Schlüssel.
 - **R8 Datei und Zeile sind eine Einheit.** Erst `intake_attachments`-Zeile ohne `storage_path`,
   dann Datei schreiben, dann `storage_path` setzen. Scheitert das Schreiben: Zeile mit `error`.
@@ -40,13 +41,16 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
 ## Zugriff und Darstellung
 
 - **R11 Login nur Entra ID** (Socialite, nur GUYCOLLE-Tenant). Kein lokales Passwort. User über
-  `entra_object_id`, nie über die E-Mail. Zugang steuert die Gruppenzuweisung der Enterprise-App.
+  `entra_object_id`, nie über die E-Mail. Zugang steuert die Gruppenzuweisung der Enterprise-App. Kein «Angemeldet bleiben», die Sitzung
+  endet nach `SESSION_LIFETIME` (8 Stunden).
 - **R11a Nur delegierte Microsoft-Berechtigungen** (E1). Graph-Aufrufe immer mit dem Token des
   betroffenen Users, nie Application Permissions. Ausnahme: der Setup-Assistent mit dem
   befristeten Admin-Token, der nicht gespeichert wird.
 - **R11b ClickUp mit dem Token des handelnden Users** (E2). Kein Service-User.
 - **R11c Tokens und Secrets nur verschlüsselt** (`encrypted`-Cast, `settings`). Nie in Logs,
-  Exceptions, Job-Payloads oder Fehlermeldungen.
+  Exceptions, Job-Payloads oder Fehlermeldungen. Parameter mit Tokens oder Secrets tragen
+  `#[\SensitiveParameter]`. Logs nennen nur die Exception-Klasse, nie die Nachricht externer
+  Antworten.
 - **R12 Sichtbarkeit über Policies.** `member` sieht und bearbeitet nur eigene Items, `admin` alle.
   Resource «Regeln» nur `admin`. Gilt auch für Livewire-Methoden, Filament-Aktionen, Bulk-Aktionen
   und die Route für Inline-Bilder und Anhänge.

@@ -63,8 +63,10 @@ Zustimmungsabfrage für die User):
    - Service Principal (Enterprise-App) mit «Zuweisung erforderlich» = ja
    - Admin Consent für die Scopes (`oauth2PermissionGrant`, `AllPrincipals`)
 4. Client-ID, Tenant-ID und Secret landen verschlüsselt in der Datenbank (`settings`, verschlüsselt
-   mit `APP_KEY`), nicht in `.env`.
-5. Der Admin wird erster App-Admin. Danach weist er der Enterprise-App die Gruppe zu (im
+   mit `APP_KEY`), nicht in `.env`. Es gibt keinen `.env`-Fallback. Auch der Handweg
+   (`intake:install --manual`) schreibt in `settings`.
+5. Der Admin wird erster App-Admin (zugeordnet über die `oid` aus dem Admin-Token, nie über die
+   E-Mail). Danach weist er der Enterprise-App die Gruppe zu (im
    Entra-Portal, wie geplant). Der Assistent zeigt den direkten Link dorthin.
 
 Admin-Seite «Microsoft 365» danach: Status der App, gewährte Scopes, Ablauf des Secrets,
@@ -89,7 +91,11 @@ Ja, das geht: ClickUp OAuth.
 - Einmalig legt ein ClickUp-Admin unter Settings, Integrations, ClickUp API eine OAuth-App an
   (Name, Redirect-URL `https://intake.guycolle.services/clickup/callback`) und trägt Client-ID
   und Secret auf der Admin-Seite «ClickUp» ein. Dafür gibt es keine API, es sind etwa 2 Minuten.
-- Jeder User klickt einmal «Mit ClickUp verbinden» und wählt den Workspace. Ohne Verbindung ist
+- Der ClickUp-Workspace ist einer für die ganze App (Setting `clickup.team_id`, gewählt auf der
+  Admin-Seite «ClickUp»). Regeln, Hierarchie und Members beziehen sich darauf. Präzisiert am
+  2026-11-02 nach Architektur-Review.
+- Jeder User klickt einmal «Mit ClickUp verbinden». Die App prüft, dass sein Token Zugriff auf
+  den App-Workspace hat. Ohne Verbindung ist
   «Task erstellen» gesperrt mit Hinweis.
 - Tasks, Kommentare und Anhänge laufen mit dem Token des Users: «Erstellt von» ist der echte User,
   ClickUp-Rechte (private Spaces) gelten wie gewohnt.
@@ -136,6 +142,19 @@ ClickUp OAuth je User. Kein Service-User, kein zusätzlicher Sitz.
   Source Sans 3 (selbst gehostet, kein Google-Fonts-Aufruf), Radius 0, keine Schatten,
   Logo und Favicon. Hell und dunkel. Ziel unter 150 Zeilen CSS, damit Filament-Updates es selten
   brechen. `guc.filament-theme` bleibt unverändert für die Filament-3-Apps.
+
+---
+
+## E6: Postfach-Adressierung und Dedupe (Folge aus E1, 2026-11-02)
+
+Mit delegierten Tokens ist das Postfach immer das des Token-Inhabers. Darum:
+
+- Graph-Aufrufe über `/me/...`, nicht `/users/{upn}/...`.
+- Dedupe über `(user_id, internet_message_id)` statt `(mailbox_upn, internet_message_id)`.
+  Eine UPN-Umbenennung führt sonst zu Doppelimporten.
+- `mailbox_upn` am Item nur zur Anzeige.
+
+Ersetzt die entsprechenden Stellen in Schritt 2 und 3 der Spezifikation.
 
 ---
 

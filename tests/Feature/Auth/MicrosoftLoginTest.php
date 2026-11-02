@@ -3,7 +3,9 @@
 use App\Enums\ConnectionStatus;
 use App\Enums\Role;
 use App\Microsoft\LoginRejected;
+use App\Microsoft\MicrosoftApp;
 use App\Microsoft\MicrosoftLogin;
+use App\Models\Setting;
 use App\Models\User;
 
 beforeEach(fn () => configureMicrosoftApp());
@@ -29,6 +31,27 @@ it('creates a member on first sign-in and stores the refresh token encrypted', f
 it('rejects a token from another tenant', function () {
     signIn(['tid' => 'other-tenant', 'oid' => 'oid-anna']);
 })->throws(LoginRejected::class);
+
+it('compares the tenant case-insensitively', function () {
+    Setting::put(MicrosoftApp::SETTING_TENANT_ID, strtoupper(TEST_TENANT_ID));
+
+    $user = signIn(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']);
+
+    expect($user->exists)->toBeTrue();
+});
+
+it('survives a parallel first sign-in of the same user', function () {
+    // Simulate the other request inserting the row between our lookup and our insert.
+    User::creating(function (User $user) {
+        User::flushEventListeners();
+        User::factory()->create(['entra_object_id' => $user->entra_object_id]);
+    });
+
+    $user = signIn(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']);
+
+    expect(User::count())->toBe(1)
+        ->and($user->ms_refresh_token)->toBe('refresh-1');
+});
 
 it('rejects a token without object id', function () {
     signIn(['tid' => TEST_TENANT_ID]);
