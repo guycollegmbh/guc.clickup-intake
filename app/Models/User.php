@@ -40,6 +40,15 @@ class User extends Authenticatable implements FilamentUser
         ];
     }
 
+    /**
+     * There are no local passwords (Microsoft only, R11). Laravel's session guard and
+     * AuthenticateSession read the password hash, an empty one disables that part.
+     */
+    public function getAuthPassword(): string
+    {
+        return '';
+    }
+
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->active;

@@ -72,6 +72,17 @@ it('signs the user in after a valid callback', function () {
     $this->get('/')->assertOk();
 });
 
+it('signs in a user who already exists (e.g. the admin created by intake:install)', function () {
+    configureMicrosoftApp();
+    User::factory()->admin()->create(['entra_object_id' => 'oid-anna']);
+    mockSocialiteCallback(fakeSocialiteUser(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']));
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))->assertRedirect('/');
+
+    $this->assertAuthenticatedAs(User::firstWhere('entra_object_id', 'oid-anna'));
+    $this->get('/')->assertOk();
+});
+
 it('takes the redirect URI from APP_URL, not from the Host header', function () {
     configureMicrosoftApp();
     config(['app.url' => 'https://intake.guycolle.services']);
