@@ -3,7 +3,9 @@
 use App\Microsoft\MicrosoftApp;
 use App\Models\Setting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 pest()->extend(TestCase::class)
@@ -28,4 +30,27 @@ function fakeIdToken(array $claims): string
     $encode = fn (array $data): string => rtrim(strtr(base64_encode(json_encode($data)), '+/', '-_'), '=');
 
     return $encode(['alg' => 'none']).'.'.$encode($claims).'.signature';
+}
+
+/**
+ * Collects every log entry of the test, to check what is (not) logged.
+ *
+ * @return ArrayObject<int, MessageLogged>
+ */
+function captureLogs(): ArrayObject
+{
+    $logs = new ArrayObject;
+    Log::listen(fn (MessageLogged $event) => $logs->append($event));
+
+    return $logs;
+}
+
+/**
+ * @param  ArrayObject<int, MessageLogged>  $logs
+ */
+function logText(ArrayObject $logs): string
+{
+    return collect($logs->getArrayCopy())
+        ->map(fn (MessageLogged $event): string => $event->level.' '.$event->message.' '.json_encode($event->context))
+        ->implode("\n");
 }

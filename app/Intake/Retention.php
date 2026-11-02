@@ -22,12 +22,6 @@ use Illuminate\Support\Facades\Log;
  */
 class Retention
 {
-    public const PRUNABLE = [
-        IntakeStatus::Created,
-        IntakeStatus::Forwarded,
-        IntakeStatus::Discarded,
-    ];
-
     /**
      * @return array{deleted: int, forced: int, stuck: int} deleted regularly, deleted after the
      *                                                      hard limit, left waiting for the category
@@ -63,7 +57,7 @@ class Retention
     private function due(DateTimeInterface $before): Builder
     {
         return IntakeItem::query()
-            ->whereIn('status', array_map(fn (IntakeStatus $status): string => $status->value, self::PRUNABLE))
+            ->whereIn('status', array_map(fn (IntakeStatus $status): string => $status->value, IntakeStatus::finalCases()))
             ->whereNotNull('processed_at')
             ->where('processed_at', '<', $before);
     }

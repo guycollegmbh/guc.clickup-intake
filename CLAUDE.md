@@ -21,11 +21,16 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 ## Struktur
 
 - `app/Microsoft/`: Entra-App (`MicrosoftApp`, Zugangsdaten nur aus `settings`, kein `.env`),
-  Login (`MicrosoftLogin`), `GraphClient` (einziger Graph-Zugang, an ein Token gebunden),
-  `Setup/` (Gerätecode, App-Registration). Token-Erneuerung je User folgt in Schritt 3, an genau
-  einer Stelle.
-- `app/Intake/`: `AttachmentStore` (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf
-  Disk `local`), `Retention`. Commands `intake:prune` (Scheduler, täglich) und `intake:orphans`.
+  Login (`MicrosoftLogin`), `GraphClient` (einziger Graph-Zugang, an ein Token gebunden,
+  `stream()` für Anhänge), `UserTokens` (einzige Token-Erneuerung je User, `graphFor()`),
+  `OutlookCategories`, `Setup/` (Gerätecode, App-Registration).
+- `app/Intake/`: `MessageImporter` (Import und Dedupe nach E7 und E8), `MailboxPoller`,
+  `ItemTransitions` (einzige Stelle für Statuswechsel, bedingte Updates), `AttachmentStore`
+  (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf Disk `local`), `Retention`.
+- `app/Jobs/`: `PollMailbox` (eindeutig je User), `SetupOutlookCategories` (nach Login).
+  Payload nur User-IDs.
+- Commands: `intake:poll` (alle 2 Minuten), `intake:prune` (täglich), `intake:orphans`,
+  `intake:setup-categories {upn?}`.
 - `app/Policies/`: Items (member eigene, admin alle), Regeln (nur admin).
 - `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
@@ -70,6 +75,7 @@ Tests verbieten echte HTTP-Aufrufe (`Http::preventStrayRequests()` in `tests/Pes
 ## Betrieb
 
 vps06, `intake.guycolle.services`, Caddy, Queue-Worker als systemd-Unit, Scheduler per Cron.
+Queue `retry_after` 360 s, muss über dem längsten Job-Timeout liegen (`PollMailbox`: 300 s).
 Details folgen in `docs/02-setup.md` (Schritt 7).
 
 ## Agenten (`.claude/agents/`)

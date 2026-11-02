@@ -1,9 +1,13 @@
 <?php
 
+use App\Jobs\SetupOutlookCategories;
 use App\Models\User;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\InvalidStateException;
 use SocialiteProviders\Azure\User as SocialiteUser;
+
+beforeEach(fn () => Queue::fake());
 
 function fakeSocialiteUser(array $claims): SocialiteUser
 {
@@ -70,6 +74,27 @@ it('signs the user in after a valid callback', function () {
 
     $this->assertAuthenticatedAs(User::firstWhere('entra_object_id', 'oid-anna'));
     $this->get('/')->assertOk();
+});
+
+it('queues the Outlook category setup for the signed-in user', function () {
+    configureMicrosoftApp();
+    mockSocialiteCallback(fakeSocialiteUser(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']));
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))->assertRedirect('/');
+
+    $user = User::firstWhere('entra_object_id', 'oid-anna');
+    Queue::assertPushed(SetupOutlookCategories::class, fn (SetupOutlookCategories $job): bool => $job->userId === $user->id);
+});
+
+it('does not queue the category setup without a refresh token', function () {
+    configureMicrosoftApp();
+    $socialUser = fakeSocialiteUser(['tid' => TEST_TENANT_ID, 'oid' => 'oid-anna']);
+    $socialUser->setRefreshToken(null);
+    mockSocialiteCallback($socialUser);
+
+    $this->get(route('auth.microsoft.callback', ['code' => 'c', 'state' => 's']))->assertRedirect('/');
+
+    Queue::assertNothingPushed();
 });
 
 it('signs in a user who already exists (e.g. the admin created by intake:install)', function () {

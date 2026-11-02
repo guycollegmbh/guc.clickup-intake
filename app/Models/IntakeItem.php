@@ -21,7 +21,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Contract (E7):
  * - imported_at is set only once the item and all attachments are completely imported.
- *   Triage shows imported items only (scope imported()).
+ *   A failed import keeps imported_at null, is failed with an error text and is retried after
+ *   next_import_at (E8). Triage shows imported and failed items (scope visibleInTriage()).
  * - Every status change sets outlook_category_synced_at to null. It is set only after the
  *   Outlook category was updated successfully for the new status (R10). Retention relies on it.
  *
@@ -68,19 +69,24 @@ class IntakeItem extends Model
             'received_at' => 'datetime',
             'status' => IntakeStatus::class,
             'imported_at' => 'datetime',
+            'import_attempts' => 'integer',
+            'next_import_at' => 'datetime',
             'processed_at' => 'datetime',
             'outlook_category_synced_at' => 'datetime',
         ];
     }
 
     /**
-     * Visible in triage: completely imported, including all attachments.
+     * Visible in triage: completely imported, or failed (also a failed import, R6).
+     * An import in progress stays hidden.
      *
      * @param  Builder<IntakeItem>  $query
      */
-    public function scopeImported(Builder $query): void
+    public function scopeVisibleInTriage(Builder $query): void
     {
-        $query->whereNotNull('imported_at');
+        $query->where(fn (Builder $query) => $query
+            ->whereNotNull('imported_at')
+            ->orWhere('status', IntakeStatus::Failed->value));
     }
 
     /**

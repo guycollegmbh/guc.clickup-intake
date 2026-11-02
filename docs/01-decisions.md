@@ -199,6 +199,47 @@ Aus den Reviews zu Schritt 2. Ergänzt Schritt 2 und 3 der Spezifikation.
 
 ---
 
+## E8: Import-Details nach Review Schritt 3 (2026-11-02)
+
+Aus den Reviews zu Schritt 3. Ergänzt E6 und E7.
+
+- **Ersatzschlüssel** in `internet_message_id`: ohne Message-ID `graph:{immutableId}`. Gleiche
+  Message-ID, aber andere Mail (andere Graph-ID und abweichende Empfangszeit oder Absender):
+  `{Message-ID}#{immutableId}`, eigenes Item, nicht still übersprungen. Graph-IDs immer mit
+  `Prefer: IdType="ImmutableId"`.
+- **Neu-Import nur bei Import-Fehlern.** Ein Import-Fehler lässt `imported_at` leer, setzt
+  `failed` mit Fehlertext, `import_attempts` und `next_import_at`. Wartezeit 2, 4, 8 ... Minuten,
+  höchstens 60. Der Poll importiert neu, wenn `imported_at` leer, der Status `pending` oder
+  `failed` und die Wartezeit vorbei ist. Ein `failed` aus späteren Schritten (Weiterleiten,
+  ClickUp) hat `imported_at` gesetzt und wird vom Poll nie angefasst. Die Triage zeigt Items
+  mit `imported_at` oder Status `failed` (Scope `visibleInTriage()`).
+- **Abgebrochene Importe** (`pending` ohne `imported_at`, älter als 15 Minuten) werden zu Beginn
+  jedes Polls zu Import-Fehlern «Der Import wurde abgebrochen.», ihre Anhänge werden entfernt.
+  Ein Poll beginnt nach 240 Sekunden keine weitere Mail.
+- **Dedupe-Tabelle (E7) ergänzt:** auch `forwarded` ohne synchronisierte Kategorie bekommt die
+  Kategorie erneut. `discarded` wird nur wieder geöffnet, wenn die Kategorie vor dem Lesen der
+  Mail-Liste synchronisiert war.
+- **Kopien** derselben Mail (gleiche Message-ID, Empfangszeit und Absender, andere Graph-ID):
+  Ist das Item erledigt, bekommt die Kopie die Kategorie des Ergebnisses. Das Item wird nicht
+  geöffnet, `graph_message_id` bleibt die der ersten Mail.
+- **Kategorien** werden ohne Gross-/Kleinschreibung verglichen (wie Outlook). Synchronisiert
+  gilt erst, wenn Graph nach dem Update keine Variante von «ClickUp» mehr meldet und die
+  Ziel-Kategorie gesetzt ist.
+- **Grenzen:** `intake.attachment_max_mb` (50) je Anhang, `intake.item_max_mb` (100) für alle
+  Anhänge einer Mail. Darüber wird nicht geladen, die Zeile erhält einen Fehlertext.
+  Unter `intake.min_free_disk_mb` (1024) freiem Platz importiert der Poll nichts.
+- **Anhangsliste:** `$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId`.
+  Im Tenant am 2026-11-02 geprüft: nacktes `contentId` ergibt 400, die qualifizierte Form 200
+  mit `@odata.type` und `contentId`, ohne `contentBytes`.
+- **Anhangnamen** werden beim Import bereinigt (Steuer- und Bidi-Zeichen, Pfadtrenner), der
+  Inhaltstyp wird aus den gespeicherten Bytes bestimmt, nicht vom Absender übernommen.
+- **Filter-Fallback:** Lehnt Graph `categories/any(...)` mit 400 und `InefficientFilter`,
+  `ErrorInvalidRestriction` oder `ErrorInvalidUrlQueryFilter` ab, liest der Poll den Posteingang
+  der letzten 7 Tage und filtert in der App. Ob der Filter im Tenant performant ist, ist noch zu
+  prüfen.
+
+---
+
 ## Weitere Punkte aus Runde 1
 
 | # | Punkt | Stand |

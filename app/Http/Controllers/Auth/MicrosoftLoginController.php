@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\ConnectionStatus;
 use App\Http\Controllers\Controller;
+use App\Jobs\SetupOutlookCategories;
 use App\Microsoft\LoginRejected;
 use App\Microsoft\MicrosoftApp;
 use App\Microsoft\MicrosoftLogin;
@@ -74,7 +76,29 @@ class MicrosoftLoginController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
+        $this->queueCategorySetup($user->id, $user->ms_connection_status);
+
         return redirect()->intended('/');
+    }
+
+    /**
+     * Outlook categories in the user's mailbox (E1). A queue failure must not block the
+     * sign-in, intake:setup-categories repairs it.
+     */
+    private function queueCategorySetup(int $userId, ?ConnectionStatus $status): void
+    {
+        if ($status !== ConnectionStatus::Connected) {
+            return;
+        }
+
+        try {
+            SetupOutlookCategories::dispatch($userId);
+        } catch (Throwable $e) {
+            Log::warning('Outlook category setup could not be queued.', [
+                'user_id' => $userId,
+                'exception' => $e::class,
+            ]);
+        }
     }
 
     /**

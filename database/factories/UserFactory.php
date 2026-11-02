@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ConnectionStatus;
 use App\Enums\Role;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -29,6 +30,20 @@ class UserFactory extends Factory
     public function admin(): static
     {
         return $this->state(fn (): array => ['role' => Role::Admin]);
+    }
+
+    /**
+     * Microsoft connection with a valid access token, so no token refresh is needed.
+     */
+    public function connected(): static
+    {
+        return $this->state(fn (): array => [
+            'ms_connection_status' => ConnectionStatus::Connected,
+            'ms_refresh_token' => 'refresh-token-old',
+            'ms_access_token' => 'access-token-valid',
+            'ms_token_expires_at' => now()->addHour(),
+            'ms_connected_at' => now(),
+        ]);
     }
 
     public function inactive(): static

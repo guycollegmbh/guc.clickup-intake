@@ -2,7 +2,6 @@
 
 namespace App\Policies;
 
-use App\Enums\IntakeStatus;
 use App\Models\IntakeItem;
 use App\Models\User;
 
@@ -33,8 +32,7 @@ class IntakeItemPolicy
      */
     public function process(User $user, IntakeItem $item): bool
     {
-        return $this->owns($user, $item)
-            && in_array($item->status, [IntakeStatus::Pending, IntakeStatus::Failed], true);
+        return $this->owns($user, $item) && $item->status->isProcessable();
     }
 
     public function create(User $user): bool

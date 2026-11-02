@@ -8,7 +8,7 @@ Stand 2026-11-02, Branch `develop`.
 | 1 | Scaffold, Theme, Microsoft-Login, CI | erledigt |
 | 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, im Tenant geprüft |
 | 2 | Datenmodell Intake | umgesetzt, Review-Befunde behoben |
-| 3 | Intake über Graph | offen |
+| 3 | Intake über Graph | umgesetzt, Reviews offen |
 | 4 | Triage in Filament | offen |
 | 5 | ClickUp-Client und OAuth je User | offen |
 | 6 | Tests | laufend je Schritt |
@@ -113,11 +113,82 @@ Code, Security und Architektur: nichts kritisch, ein Befund hoch. Behoben, Entsc
 - `IntakeRule::ordered()` (Priorität, dann ID).
 - 146 Tests grün.
 
+## Schritt 3
+
+- `app/Microsoft/UserTokens.php`: einzige Stelle für die Token-Erneuerung je User. Access-Token
+  verschlüsselt am User, Erneuerung 10 Minuten vor Ablauf unter `Cache::lock` je User, neuer
+  Refresh-Token sofort gespeichert. `invalid_grant`, `interaction_required`, `consent_required`
+  setzen `broken` und löschen die Tokens (`MicrosoftConnectionBroken`). 5xx, Netzwerk,
+  `invalid_client` und Sperr-Timeout ändern den Status nicht (`MicrosoftTokenUnavailable`).
+  Inaktive User erhalten keinen Token. `graphFor()` liefert einen GraphClient mit
+  `Prefer: IdType="ImmutableId"`, `forget()` verwirft den Access-Token nach einer 401.
+- `GraphClient`: Prefer-Werte je Client und je Aufruf (ein Header), `stream()` für
+  `$value` (Ressource, gleiche Retry-Regeln, R5), absolute URLs nur unter `BASE_URL` (nextLink).
+  Behoben: eine leere `query`-Option hätte den Query-String des nextLink entfernt.
+- `app/Microsoft/OutlookCategories.php`: `ensureMasterCategories()` legt nur fehlende an,
+  `replace(user, graphId, from, to)` ersetzt eine Kategorie, behält alle anderen, vergleicht
+  ohne Gross-/Kleinschreibung und prüft die Antwort von Graph. 404 gilt als erledigt.
+  Job `SetupOutlookCategories` nach jedem Login, `intake:setup-categories {upn?}` für Reparaturen.
+- `app/Intake/ItemTransitions.php`: einzige Stelle für Statuswechsel, jeder als bedingtes
+  Update mit erlaubten Ausgangszuständen (gibt `bool` zurück): `claimForImport`,
+  `markImportFailed`, `backToPending`, `syncCategory`, `alignCopy`. `IntakeStatus::isFinal()`
+  und `isProcessable()` ersetzen die Listen in Retention und Policy.
+- `app/Intake/MessageImporter.php`: Import nach E7 und E8, gibt das Item zurück (Phase C).
+  Item entsteht zuerst aus der Übersicht, damit auch ein Fehler beim Laden der Mail sichtbar
+  wird. Import-Fehler: `failed`, `imported_at` leer, Neu-Import mit Wartezeit.
+- `app/Intake/MailboxPoller.php`, Job `PollMailbox` (eindeutig je User, Timeout 300 s,
+  `retry_after` der Queue 360 s), `intake:poll` alle 2 Minuten (`withoutOverlapping`). Prüft
+  zuerst den freien Platz, macht abgebrochene Importe zu Import-Fehlern, beginnt nach 240 s
+  keine weitere Mail, setzt danach `users.ms_last_polled_at`. Graph-Fehler beim Lesen der Liste
+  beenden den Job ohne Eintrag in `failed_jobs`.
+- Migrationen: `intake_items.import_attempts`, `next_import_at`, `users.ms_last_polled_at`.
+
+## Reviews nach Schritt 3
+
+Code, Security und Architektur: drei Befunde hoch, alle behoben, Entscheide in E8:
+
+- `$select` der Anhangsliste in der im Tenant geprüften Form (hoch). FakeGraph beantwortet
+  nacktes `contentId` wie der Tenant mit 400.
+- Neu-Import nur bei Import-Fehlern, mit Wartezeit 2 bis 60 Minuten (hoch). Ein `failed` aus
+  späteren Schritten wird vom Poll nicht mehr angefasst (vorher Endlosschleife alle 2 Minuten).
+- Bedingte Statusübergänge, ein paralleles «Verwerfen» wird nicht überschrieben (hoch).
+- Abgebrochene Importe, Frist im Poll, Kategorien ohne Gross-/Kleinschreibung, Kopien einer Mail,
+  401 beim Lesen der Liste, inaktive User ohne Token.
+- Grenzen `item_max_mb` und `min_free_disk_mb`, Anhangnamen bereinigt, Inhaltstyp aus den Bytes,
+  gespeicherte Grösse aus den geschriebenen Bytes.
+- `ImportOutcome` entfernt (R17), der Importer gibt das Item zurück.
+- 254 Tests grün.
+
+Detailentscheide:
+
+- Anhänge: Inline gilt auch, wenn der Body `cid:{contentId}` referenziert (Graph meldet
+  `isInline` nicht immer). Zu grosse Anhänge werden nicht geladen, die Zeile erhält den Fehler,
+  das Item wird trotzdem importiert. Ein fehlgeschlagener Download ist ein Import-Fehler.
+  `selected_for_upload` nur für nicht inline, nicht reference und ohne Fehler.
+- `graph_message_id` folgt Kopien nicht. Ist die erste Mail gelöscht, scheitert ein Neu-Import
+  mit 404 (sichtbar), das Item wird dann verworfen.
+- Body als HTML angefordert, `body_text` ohne neues Paket aus dem HTML. Reiner Text wird
+  escaped als `body_html` abgelegt.
+
+Gegen den Tenant noch zu prüfen:
+
+- Filter `categories/any(...)` auf `/me/messages`: Antwortzeit und ob Graph ihn ablehnt
+  (welcher Fehlercode, passt die Liste für den Fallback?).
+- Felder eines referenceAttachment in v1.0.
+- `Prefer: IdType="ImmutableId", outlook.body-content-type="html"` in einem Header, ID bleibt
+  nach Verschieben gleich, `/$value` für itemAttachment liefert MIME, PATCH auf die Mail
+  liefert `categories` zurück.
+- Streaming über Guzzle nutzt bei `allow_url_fopen=On` den Stream-Handler, sonst schreibt cURL
+  in einen temporären Stream. Auf vps06 prüfen.
+
 ## Offen und bekannt
 
 - Warnung vor Ablauf des Secrets und Admin-Seite «Microsoft 365» folgen mit Schritt 4 bzw. 7.
 - `.env.production.example` bzw. Deploy-Checkliste folgt in Schritt 7 (`docs/02-setup.md`).
 - Anhänge liegen unter `storage/app/private/intake` (Wurzel der Disk `local`). E4 nennt für das
   Backup `storage/app/intake`, in Schritt 7 angleichen.
-- Statusübergänge an einer Stelle folgen mit Schritt 3 bis 5. Diese Stelle leert
-  `outlook_category_synced_at` bei jedem Statuswechsel und setzt es nach dem Kategorie-Update.
+- Beim Deaktivieren eines Users müssen seine Microsoft- und ClickUp-Tokens gelöscht werden.
+  Kommt mit der Admin-Aktion in Schritt 4. Bis dahin verweigert `UserTokens` inaktiven Usern
+  jeden Token.
+- R4 und R7 in `.claude/rules/intake.md` sind noch nicht um E8 ergänzt (Regeldatei, Änderung
+  durch den Inhaber).

@@ -66,11 +66,13 @@ it('refuses to delete a user who still has items', function () {
     $item->user->delete();
 })->throws(QueryException::class);
 
-it('shows only completely imported items in triage', function () {
+it('shows imported and failed items in triage, not an import in progress', function () {
     $imported = IntakeItem::factory()->create();
     IntakeItem::factory()->importing()->create();
+    $importFailed = IntakeItem::factory()->importing()->failed()->create();
 
-    expect(IntakeItem::query()->imported()->pluck('id')->all())->toBe([$imported->id]);
+    expect(IntakeItem::query()->visibleInTriage()->orderBy('id')->pluck('id')->all())
+        ->toBe([$imported->id, $importFailed->id]);
 });
 
 it('orders rules by priority, then id', function () {

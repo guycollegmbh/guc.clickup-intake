@@ -9,3 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('intake:prune')->dailyAt('03:30')->withoutOverlapping();
+
+Schedule::command('intake:poll')->everyTwoMinutes()->withoutOverlapping();

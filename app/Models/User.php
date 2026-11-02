@@ -38,6 +38,7 @@ class User extends Authenticatable implements FilamentUser
             'clickup_token' => 'encrypted',
             'clickup_connection_status' => ConnectionStatus::class,
             'last_login_at' => 'datetime',
+            'ms_last_polled_at' => 'datetime',
         ];
     }
 

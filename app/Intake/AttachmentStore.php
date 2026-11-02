@@ -76,7 +76,7 @@ class AttachmentStore
         $path = self::pathFor($attachment);
 
         try {
-            $complete = $this->copy($stream, $path, $maxBytes);
+            $bytes = $this->copy($stream, $path, $maxBytes);
         } catch (Throwable $e) {
             $this->removeFile($path);
             Log::warning('Intake attachment could not be written.', [
@@ -87,13 +87,15 @@ class AttachmentStore
             return $this->markFailed($attachment, 'Der Anhang konnte nicht gespeichert werden.');
         }
 
-        if (! $complete) {
+        if ($bytes === null) {
             $this->removeFile($path);
 
             return $this->markFailed($attachment, $this->tooLargeMessage());
         }
 
         try {
+            // The size Graph declares is the sender's claim, the written bytes are not.
+            $attachment->size = $bytes;
             $attachment->storage_path = $path;
             $attachment->save();
         } catch (Throwable $e) {
@@ -110,6 +112,62 @@ class AttachmentStore
         }
 
         return $attachment;
+    }
+
+    /**
+     * A row with an error and without file, for an attachment that is not downloaded at all
+     * (e.g. over the limit of the whole mail). The text is shown in triage.
+     *
+     * @param  array<string, mixed>  $attributes  fillable IntakeAttachment fields
+     */
+    public function reject(IntakeItem $item, array $attributes, string $error): IntakeAttachment
+    {
+        /** @var IntakeAttachment $attachment */
+        $attachment = $item->attachments()->create($attributes);
+
+        return $this->markFailed($attachment, $error);
+    }
+
+    /**
+     * MIME type of the stored content, determined here. The sender's content type is not
+     * trustworthy.
+     */
+    public function detectMimeType(IntakeAttachment $attachment): ?string
+    {
+        if ($attachment->storage_path === null) {
+            return null;
+        }
+
+        $type = (new \finfo(FILEINFO_MIME_TYPE))->file($this->disk()->path($attachment->storage_path));
+
+        return is_string($type) && $type !== '' ? $type : null;
+    }
+
+    /**
+     * Whether the attachment disk has at least intake.min_free_disk_mb free (E8).
+     */
+    public function hasFreeSpace(): bool
+    {
+        $free = @disk_free_space($this->disk()->path(''));
+
+        return $free !== false && $free >= (int) config('intake.min_free_disk_mb') * 1024 * 1024;
+    }
+
+    /**
+     * Removes all attachment rows and files of an item before it is imported again (E7).
+     * Rows first: a directory that cannot be removed throws, the import then fails visibly
+     * and the leftover files are reported by intake:orphans. New rows get new ids, so a
+     * leftover file is never mixed up with a new attachment.
+     */
+    public function clear(IntakeItem $item): void
+    {
+        $item->attachments()->delete();
+
+        $directory = self::directoryFor($item->getKey());
+
+        if ($this->disk()->exists($directory) && ! $this->disk()->deleteDirectory($directory)) {
+            throw new RuntimeException('Cannot remove the attachment directory of the item.');
+        }
     }
 
     /**
@@ -206,9 +264,9 @@ class AttachmentStore
 
     /**
      * @param  resource  $source
-     * @return bool false if the content exceeds the limit
+     * @return int|null bytes written, null if the content exceeds the limit
      */
-    private function copy($source, string $path, int $maxBytes): bool
+    private function copy($source, string $path, int $maxBytes): ?int
     {
         if (! $this->disk()->makeDirectory(dirname($path))) {
             throw new RuntimeException('Cannot create the attachment directory.');
@@ -234,7 +292,7 @@ class AttachmentStore
                 $bytes += strlen($chunk);
 
                 if ($bytes > $maxBytes) {
-                    return false;
+                    return null;
                 }
 
                 if (fwrite($target, $chunk) !== strlen($chunk)) {
@@ -249,7 +307,7 @@ class AttachmentStore
             fclose($target);
         }
 
-        return true;
+        return $bytes;
     }
 
     private function markFailed(IntakeAttachment $attachment, string $error): IntakeAttachment
@@ -273,7 +331,11 @@ class AttachmentStore
         return (int) config('intake.attachment_max_mb') * 1024 * 1024;
     }
 
-    private function tooLargeMessage(): string
+    /**
+     * Error text of a row whose content exceeds intake.attachment_max_mb. The importer uses it
+     * to tell a too large attachment (kept, item imported) from a failed download.
+     */
+    public function tooLargeMessage(): string
     {
         $mb = (int) config('intake.attachment_max_mb');
 
