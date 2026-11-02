@@ -1,234 +1,168 @@
 # 01: Entscheide (Schritt 0, Konzept-Check)
 
-Stand 2026-11-02. Status: **Vorschlag, wartet auf Freigabe.** Nach Freigabe verbindlich (siehe
-`.claude/rules/intake.md`).
+Stand 2026-11-02, Runde 2. Status: **E3 bis E5 freigegeben, E1 und E2 geändert, warten auf
+Bestätigung.** Nach Freigabe verbindlich (siehe `.claude/rules/intake.md`).
 
-Grundlage: `docs/AGENT_PROMPT.md`, dazu die Nachbar-Repos `guc.filament-theme`, `guc.quotebot`
-(Belegablage mit Graph App-only), `guc.cronman` und das Inventar in `guc.ansible`.
+Grundlage: `docs/AGENT_PROMPT.md`, die Nachbar-Repos `guc.filament-theme`, `guc.quotebot`,
+`guc.cronman`, das Inventar in `guc.ansible` und die Rückmeldung des Inhabers vom 2026-11-02:
+
+- Einrichtung wie bei modernen Apps: Ein M365-Admin legt die App an und erteilt die
+  Berechtigungen, ohne Handarbeit im Entra-Portal oder in PowerShell.
+- Zugang über eine Gruppe im Tenant, die der App zugewiesen wird.
+- Jeder arbeitet mit dem eigenen ClickUp-User.
+- Neues, einfaches Theme.
 
 ---
 
-## E1: Graph-Berechtigung
+## E1: Microsoft 365, Einrichtung und Berechtigung (geändert)
 
-### Optionen
+### Modell: delegierte Berechtigungen statt Application Permission
 
-| | A: Application Permission + Zugriffsbeschränkung | B: Delegated pro User |
+Runde 1 empfahl eine Application Permission mit Exchange Access Policy. Die Access Policy lässt
+sich nur per Exchange-PowerShell anlegen, nicht über Graph. Eine App, die sich per Admin-Klick
+einrichtet, kann sie also nicht selbst setzen. Ohne sie hätte die App Zugriff auf **alle**
+Postfächer im Tenant. Darum jetzt:
+
+| | Delegated (neu) | Application + Access Policy (Runde 1) |
 |---|---|---|
-| Token | Ein Client-Credentials-Token für alle Mailboxen | Refresh-Token je User, verschlüsselt gespeichert |
-| Ausfall | Nur bei abgelaufenem Secret oder Zertifikat (einmal, sichtbar) | Still je User nach Inaktivität, Passwortwechsel, CA-Richtlinie |
-| Poll | Ein Job je aktivem User, gleiches Token | Ein Job je User mit dessen Token, Refresh-Logik |
-| Reichweite | Ohne Beschränkung alle Mailboxen im Tenant, darum Beschränkung Pflicht | Nur die eigene Mailbox |
-| Aufwand | Einmalig Exchange-PowerShell | Token-Lifecycle im Code, Re-Consent-Flows |
-| Bewährt im Tenant | Ja, `guc.quotebot` Belegablage | Nein |
+| Einrichtung | vollständig im Setup-Assistenten | Setup-Assistent plus PowerShell von Hand |
+| Reichweite | nur die Postfächer der angemeldeten, zugewiesenen User, jeder nur das eigene | alle Postfächer, falls die Policy fehlt oder falsch ist |
+| Zugang | eine Gruppe, der App zugewiesen, steuert Login **und** Mailzugriff | Gruppe für Login, zweite Gruppe für die Policy |
+| Kategorien anlegen | automatisch beim ersten Login im eigenen Postfach | Command für alle Postfächer |
+| Schwachpunkt | Refresh-Token je User (siehe unten) | keiner im Betrieb |
 
-### Benötigte Permissions (Korrektur zur Spezifikation)
+Delegierte Scopes, beim Login angefordert, einmal per Admin Consent für alle erteilt (keine
+Zustimmungsabfrage für die User):
 
-Die Spezifikation nennt nur `Mail.ReadWrite`. Für den vollen Funktionsumfang braucht es:
+`openid profile email offline_access User.Read Mail.ReadWrite Mail.Send MailboxSettings.ReadWrite`
 
-| Permission | Wofür |
-|---|---|
-| `Mail.ReadWrite` | Mails und Anhänge lesen, Kategorien auf der Mail setzen |
-| `Mail.Send` | `POST /messages/{id}/forward` («An Support weiterleiten») |
-| `MailboxSettings.ReadWrite` | `outlook/masterCategories` für `intake:setup-categories` |
+### Token-Lifecycle und wie er beherrschbar bleibt
 
-Alle drei als Application Permission, alle drei von derselben Zugriffsbeschränkung erfasst.
-Alternativ entfällt `MailboxSettings.ReadWrite`, wenn die drei Kategorien einmalig von Hand oder
-per PowerShell angelegt werden. Dann wird `intake:setup-categories` zur reinen Prüfung.
+- Der Poll alle 2 Minuten erneuert den Refresh-Token laufend. Die 90 Tage Inaktivität werden nie
+  erreicht.
+- Ungültig wird er bei Passwort-Reset, Sperrung, Widerruf durch den Admin, Entzug der
+  Gruppenzuweisung. Dann: User-Status «Microsoft-Verbindung unterbrochen», sichtbar im
+  Admin-Dashboard und als Banner. Der nächste Login repariert es automatisch.
+- **Voraussetzung:** Keine Conditional-Access-Richtlinie mit «Anmeldehäufigkeit» auf dieser App,
+  sonst bricht der Poll in diesem Takt. Falls es eine solche Richtlinie gibt, die App davon
+  ausnehmen.
 
-Eigene App-Registration «guc.clickup-intake», nicht die der Belegablage mitbenutzen. Getrennte
-Secrets, getrennte Gruppen, getrennter Widerruf.
+### Setup-Assistent («Mit Microsoft 365 verbinden»)
 
-### PowerShell: Application Access Policy
+1. `php artisan intake:install` auf dem Server gibt einen einmaligen Setup-Link aus. `/setup` ist
+   nur erreichbar, solange die App nicht eingerichtet ist, und nur mit diesem Link.
+2. Der Admin meldet sich im Assistenten per Gerätecode an (microsoft.com/devicelogin) über den
+   öffentlichen Client «Microsoft Graph Command Line Tools», denselben, den `Connect-MgGraph`
+   verwendet. Der Assistent fordert dafür nur befristet `Application.ReadWrite.All` und
+   `DelegatedPermissionGrant.ReadWrite.All` an. Dieser Token wird nicht gespeichert.
+3. Der Assistent legt per Graph an:
+   - App-Registration «GUYCOLLE ClickUp-Intake», Single-Tenant, Redirect-URI
+     `https://intake.guycolle.services/auth/microsoft/callback`, Logo, die Scopes oben
+   - Client-Secret (24 Monate)
+   - Service Principal (Enterprise-App) mit «Zuweisung erforderlich» = ja
+   - Admin Consent für die Scopes (`oauth2PermissionGrant`, `AllPrincipals`)
+4. Client-ID, Tenant-ID und Secret landen verschlüsselt in der Datenbank (`settings`, verschlüsselt
+   mit `APP_KEY`), nicht in `.env`.
+5. Der Admin wird erster App-Admin. Danach weist er der Enterprise-App die Gruppe zu (im
+   Entra-Portal, wie geplant). Der Assistent zeigt den direkten Link dorthin.
 
-```powershell
-Connect-ExchangeOnline
+Admin-Seite «Microsoft 365» danach: Status der App, gewährte Scopes, Ablauf des Secrets,
+verbundene User, Knopf «Secret erneuern» (gleicher Gerätecode-Ablauf, Warnung ab 30 Tage vor
+Ablauf, Mail an alle Admins). Kein Dauerrecht der App auf die eigene Registration.
 
-# Mail-aktivierte Sicherheitsgruppe «ClickUp-Intake» muss bestehen, Mitglieder = Team-Postfächer.
-New-ApplicationAccessPolicy `
-  -AppId "<INTAKE_CLIENT_ID>" `
-  -PolicyScopeGroupId "clickup-intake@guycolle.ch" `
-  -AccessRight RestrictAccess `
-  -Description "guc.clickup-intake: nur Postfaecher der Gruppe ClickUp-Intake"
-
-# Positiv- und Negativtest (Auswertung kann bis 30 Minuten dauern)
-Test-ApplicationAccessPolicy -Identity "<mitglied>@guycolle.ch"      -AppId "<INTAKE_CLIENT_ID>"
-Test-ApplicationAccessPolicy -Identity "<nicht-mitglied>@guycolle.ch" -AppId "<INTAKE_CLIENT_ID>"
-```
-
-Erwartet: `Granted` für Mitglieder, `Denied` für alle anderen. Gilt für `Mail.*` und
-`MailboxSettings.*`.
-
-Hinweis: Microsoft empfiehlt für neue Setups «RBAC for Applications» in Exchange Online
-(`New-ManagementScope` plus `New-ManagementRoleAssignment` mit Rollen wie
-`Application Mail.ReadWrite`, `Application Mail.Send`). Dann werden die Permissions **nicht** in
-Entra erteilt, sonst gilt die Vereinigung beider Wege und die Beschränkung ist wirkungslos. Die
-Access Policy ist im Tenant bewährt und reicht für V1. In `docs/02-setup.md` dokumentiere ich
-beide Wege mit der Access Policy als Standard.
+**Voraussetzung:** Der Gerätecode-Ablauf ist im Tenant nicht per Conditional Access gesperrt.
+Falls doch: für die Einrichtung kurz ausnehmen oder Fallback «App-Registration von Hand» nach
+`docs/02-setup.md`. Der Assistent übernimmt dann ab Schritt 4.
 
 ### Empfehlung
 
-**A**, mit eigener App-Registration, den drei Permissions oben und Application Access Policy auf
-die Gruppe «ClickUp-Intake». Kein Token-Lifecycle je User, kein stilles Ausfallen.
+Delegierte Berechtigungen, Einrichtung über den Setup-Assistenten, Zugang über die zugewiesene
+Gruppe. Kein PowerShell, keine Access Policy, minimale Reichweite.
 
 ---
 
-## E2: ClickUp-Auth
+## E2: ClickUp, jeder mit eigenem User (geändert)
 
-### Optionen
+Ja, das geht: ClickUp OAuth.
 
-| | A: Personal API Token eines Service-Users | B: OAuth je User |
+- Einmalig legt ein ClickUp-Admin unter Settings, Integrations, ClickUp API eine OAuth-App an
+  (Name, Redirect-URL `https://intake.guycolle.services/clickup/callback`) und trägt Client-ID
+  und Secret auf der Admin-Seite «ClickUp» ein. Dafür gibt es keine API, es sind etwa 2 Minuten.
+- Jeder User klickt einmal «Mit ClickUp verbinden» und wählt den Workspace. Ohne Verbindung ist
+  «Task erstellen» gesperrt mit Hinweis.
+- Tasks, Kommentare und Anhänge laufen mit dem Token des Users: «Erstellt von» ist der echte User,
+  ClickUp-Rechte (private Spaces) gelten wie gewohnt.
+- Laut ClickUp-Doku laufen OAuth-Tokens derzeit nicht ab. In Schritt 5 verifizieren. Bei 401:
+  Status «ClickUp-Verbindung unterbrochen», neu verbinden.
+- Hierarchie wird je User geladen und gecacht (sieht nur, was er in ClickUp sieht).
+  Rate-Limit je Token.
+- `clickup_member_id` am User wird bei der Verbindung automatisch gesetzt, kein Pflegefeld mehr.
+- Wird ein User deaktiviert, wird sein Token gelöscht.
+
+### Empfehlung
+
+ClickUp OAuth je User. Kein Service-User, kein zusätzlicher Sitz.
+
+---
+
+## E3: Login und Rollen (freigegeben)
+
+- Entra-Login über Socialite mit der App aus E1, Single-Tenant, `tid` und `oid` geprüft.
+  Kein lokales Passwort.
+- Zugang: Gruppe im Tenant, der Enterprise-App zugewiesen («Zuweisung erforderlich»). Wer nicht
+  zugewiesen ist, kommt bei Microsoft nicht durch. User wird beim ersten Login angelegt.
+- Rollen als Spalte `role`, nicht mass-assignable. Erster Admin ist, wer den Setup-Assistenten
+  abschliesst. Zusätzlich `php artisan intake:make-admin {email}` als Notweg.
+
+---
+
+## E4: Betrieb (freigegeben)
+
+- **vps06** (guc.dns, guc.cronman, Caddy, Redis, PHP 8.4), Subdomain **intake.guycolle.services**.
+- Queue-Worker als **systemd-Unit** (`clickup-intake-worker.service`), nicht Supervisor. Begründung:
+  auf vps06 laufen die Worker bereits als systemd-Units, ein Host soll nur eine
+  Prozessverwaltung haben, und systemd braucht kein zusätzliches Paket.
+- Scheduler per Cron, Redis mit eigener DB-Nummer und Prefix.
+- Backup: SQLite und `storage/app/intake` in den bestehenden Lauf von guc.backup.
+- Eintrag in `guc.ansible` unter `urls`.
+
+---
+
+## E5: Stack und Theme (freigegeben)
+
+- Laravel 13, Filament 5, PHP 8.4, SQLite, Redis, Pest.
+- **Neues, einfaches Theme im Repo** (Filament-Theme über Vite): Primary `#00AEEF`, Dark `#231F20`,
+  Source Sans 3 (selbst gehostet, kein Google-Fonts-Aufruf), Radius 0, keine Schatten,
+  Logo und Favicon. Hell und dunkel. Ziel unter 150 Zeilen CSS, damit Filament-Updates es selten
+  brechen. `guc.filament-theme` bleibt unverändert für die Filament-3-Apps.
+
+---
+
+## Weitere Punkte aus Runde 1
+
+| # | Punkt | Stand |
 |---|---|---|
-| «Erstellt von» | Service-User | echter User |
-| Aufwand | Token in `.env`, fertig | OAuth-App, Token je User, Refresh, Re-Consent |
-| Rate-Limit | 100 Requests pro Minute für alle zusammen | je User |
-| Ausfall | Token widerrufen oder Service-User deaktiviert: alle betroffen, sofort sichtbar | je User still |
-| Kosten | Service-User belegt einen ClickUp-Sitz | keine |
+| 1 | Fehlende Graph-Permissions | gelöst durch E1 (delegiert, inkl. `Mail.Send`, `MailboxSettings.ReadWrite`) |
+| 2 | Theme inkompatibel | gelöst durch E5 |
+| 3 | Supervisor oder systemd | entschieden: systemd (E4) |
+| 4 | Wer darf sich anmelden | gelöst durch Gruppenzuweisung (E3) |
+| 5 | Teilerfolg bei «Task erstellen» | angenommen: `failed` mit `clickup_task_id`, Aktion «Fehlende Anhänge erneut hochladen» |
+| 6 | Erneut markieren nach «Verwerfen» | angenommen: Item zurück auf `pending` |
+| 7 | Kategorien | angenommen: «ClickUp» wird durch «ClickUp ✓» bzw. «Support ✓» ersetzt, andere bleiben |
+| 8 | Inline-Bilder im sandboxed iframe | kurzlebige signierte URLs, in Schritt 4 verifizieren |
+| 9 | ClickUp-Feldname Beschreibung | in Schritt 5 prüfen |
+| 10 | Retention vor Kategorie-Update | Item erst löschen, wenn die Kategorie gesetzt ist |
+| 11 | `guc.newsletter` nicht lokal | Versionen gegen `guc.bexio-abgleich` geprüft |
+| 12 | Grösse von Anhängen | Limit 50 MB je Anhang, konfigurierbar |
 
-Folgen von A, die das Team kennen muss:
-- «Erstellt von» und Benachrichtigungen «X hat einen Task erstellt» zeigen den Service-User.
-- Wer den Task ausgelöst hat, steht im Kommentar (Checkbox «Absender und Mail-Link als Kommentar
-  anfügen», ergänzt um «Erstellt über ClickUp-Intake von {name}») und in `processed_by`.
-- Filter «von mir erstellt» in ClickUp funktioniert nicht mehr für diese Tasks.
-- 100 Requests pro Minute reichen: ein Task mit 5 Anhängen braucht etwa 7 Requests.
+## Auswirkungen auf die Spezifikation
 
-### Empfehlung
-
-**A** für V1, mit dem Kommentar-Zusatz oben als Nachweis des Auslösers. Offene Frage an dich:
-Ist «Erstellt von = Service-User» im Team ein Problem, und gibt es einen freien ClickUp-Sitz oder
-einen bestehenden technischen User?
-
----
-
-## E3: Login und Rollen
-
-### Login
-
-Entra ID SSO über Socialite (`socialiteproviders/microsoft-azure`) mit Tenant-ID statt `common`,
-im Callback zusätzlich `tid` gegen `AZURE_TENANT_ID` geprüft. Kein lokales Passwort, keine
-Passwort-Reset-Routen. Abgleich über `entra_object_id` (`oid`), nicht über die E-Mail.
-
-Separate App-Registration für den Login (nur `openid profile email User.Read`, delegated) oder
-dieselbe wie für Graph: **getrennt**, damit ein Leck des Login-Secrets keinen Mailzugriff gibt.
-
-### Wer darf rein
-
-Die Spezifikation beschränkt nur auf den Tenant. Damit könnte sich jeder Tenant-User anmelden und
-würde ein User mit Mailbox. Vorschlag: Neue User werden beim ersten Login mit `active = false`
-angelegt, ausser sie sind Mitglied der Gruppe «ClickUp-Intake» (Abfrage per Gruppen-Claim
-`groups` im ID-Token, ohne zusätzliche Permission). Nur aktive User werden gepollt und dürfen
-ins Panel. Das hält Login-Zugang und Mailbox-Zugriff (E1) an derselben Gruppe.
-
-### Rollen
-
-| | Spalte `role` | Entra-Gruppe «ClickUp-Intake-Admins» |
-|---|---|---|
-| Pflege | Im Panel durch Admin | Im Entra-Admin-Center |
-| Erster Admin | `php artisan intake:make-admin {email}` | Gruppenmitgliedschaft |
-| Aufwand | gering | zweite Gruppe, Claim-Auswertung |
-
-### Empfehlung
-
-Socialite mit Tenant-Bindung, Zugang über die Gruppe «ClickUp-Intake», Rollen als **Spalte**,
-erster Admin per Artisan-Command. `role` ist nicht mass-assignable.
-
----
-
-## E4: Betrieb
-
-### Server
-
-Kein neuer Server (Vorgabe). Kandidaten aus `guc.ansible/inventory/production.yml`:
-
-| Host | Apps | Caddy | Redis | Bemerkung |
-|---|---|---|---|---|
-| **vps06** | guc.dns, guc.cronman | ja | ja (cronman) | interne Tools, gleicher Stack (PHP 8.4, SQLite, Redis) |
-| vps07 | guc.quotebot (bexio.guycolle.services) | ja | unbekannt | hat bereits Graph-Mailzugriff, Fachanwendung mit eigenem Betriebsregime |
-
-### Subdomain
-
-`intake.guycolle.services`, passend zu `cron.`, `dns.`, `bexio.guycolle.services`. DNS-Eintrag über
-guc.dns, TLS automatisch über Caddy. Danach in `guc.ansible` unter `urls` eintragen.
-
-### Prozesse
-
-- Queue-Worker: Die Spezifikation nennt Supervisor. Auf vps06 laufen Worker als **systemd-Unit**
-  (`cronman-worker.service`). Vorschlag: ebenfalls systemd (`clickup-intake-worker.service`),
-  damit ein Host nur eine Prozessverwaltung hat.
-- Scheduler: Cron-Eintrag `* * * * * php artisan schedule:run` unter dem App-User.
-- Redis: bestehende Instanz auf vps06, eigene DB-Nummer und eigener Prefix.
-- Backup: SQLite und `storage/app/intake` in den bestehenden Backup-Lauf (guc.backup auf vps05).
-
-### Empfehlung
-
-**vps06**, `intake.guycolle.services`, Worker als systemd-Unit statt Supervisor, Cron für den
-Scheduler, Redis mit eigener DB-Nummer.
-
----
-
-## E5: Filament-Version und Theme
-
-### Befund
-
-`guycollegmbh/filament-theme` (aktuell v1.1.0) verlangt `filament/filament: ^3.0` und
-`illuminate/support: ^12.0`. Es ist **nicht kompatibel** mit Laravel 13 und Filament 5. Es gibt
-keinen Branch für Filament 4 oder 5. Das Paket selbst ist klein: ein Plugin, ein
-ServiceProvider, `theme.css`, zwei Blade-Komponenten, Logos (rund 700 Zeilen).
-
-Im Haus laufen bereits Laravel 13 mit Filament 5 (`guc.bexio-abgleich`, `fam.wochenplan`) ohne das
-Theme-Paket. `guc.newsletter` als Referenz liegt lokal nicht vor, ich konnte es nicht prüfen.
-
-### Optionen
-
-| | A: Laravel 12 + Filament 3 mit Theme | B: Laravel 13 + Filament 5, Theme zuerst portieren | C: Laravel 13 + Filament 5, Theme lokal nachbauen |
-|---|---|---|---|
-| Theme | sofort | Paket v2.0 für Filament 5 (eigener Lauf im Theme-Repo) | Farben, Schrift, Radius im PanelProvider plus eigene `theme.css` |
-| Lebensdauer | Filament 3 ist zwei Major-Versionen alt, Upgrade 3 → 5 steht bald an | lang | lang |
-| Aufwand | gering | mittel (Theme-CSS gegen Filament-5-Markup prüfen) | gering, aber Abweichung vom Designsystem |
-| Nutzen für andere Repos | keiner | alle künftigen Filament-5-Apps | keiner |
-
-### Empfehlung
-
-**B**: Laravel 13 und Filament 5, vorher `guc.filament-theme` als v2.0 auf Filament 5 portieren
-(eigener Lauf im Theme-Repo, v1.x bleibt für die Filament-3-Apps). Falls das den Start zu stark
-verzögert: Start mit C und Wechsel auf das Paket, sobald v2.0 da ist. A widerspricht
-«Wartbarkeit vor Eleganz», weil das Upgrade nur verschoben wird.
-
----
-
-## Widersprüche und Unklarheiten in der Spezifikation
-
-1. **Fehlende Graph-Permissions.** Weiterleiten braucht `Mail.Send`, `masterCategories` braucht
-   `MailboxSettings.ReadWrite`. Siehe E1.
-2. **Theme inkompatibel** mit der vorgegebenen Laravel- und Filament-Version. Siehe E5.
-3. **Supervisor vs. systemd.** Spezifikation nennt Supervisor, der Zielserver nutzt systemd.
-   Siehe E4.
-4. **Wer darf sich anmelden.** Nur «GUYCOLLE-Tenant» würde jeden Tenant-User zum gepollten User
-   machen. Und ein Teammitglied wird erst nach dem ersten Login gepollt. Siehe E3.
-5. **Teilerfolg bei «Task erstellen».** Task ist angelegt, ein Upload scheitert endgültig. Status
-   `failed` würde einen erneuten Klick auf «Task erstellen» und damit einen zweiten Task nahelegen.
-   Vorschlag: Status `failed` mit gesetzter `clickup_task_id`, Aktion «Fehlende Anhänge erneut
-   hochladen» statt «Task erstellen», Kategorie bleibt «ClickUp».
-6. **Erneut markieren nach «Verwerfen».** Dedupe über `(mailbox_upn, internet_message_id)` blockiert
-   den Re-Import, solange das verworfene Item existiert (30 Tage). Wer eine verworfene Mail erneut
-   mit «ClickUp» markiert, sieht nichts. Vorschlag: Taucht eine Mail mit Kategorie «ClickUp» auf,
-   deren Item `discarded` ist, wird das Item auf `pending` zurückgesetzt.
-7. **Kategorien ersetzen oder ergänzen.** Für «ClickUp ✓» und «Support ✓» nicht ausdrücklich
-   geregelt. Vorschlag: «ClickUp» wird jeweils ersetzt, andere Kategorien des Users bleiben.
-   Sonst importiert der Poll die Mail bei jedem Lauf erneut (Dedupe fängt es ab, kostet aber
-   Requests).
-8. **Inline-Bilder im sandboxed iframe.** Ein iframe mit `sandbox=""` hat einen opaken Ursprung.
-   Requests daraus gelten als cross-site, das Session-Cookie (`SameSite=Lax`) wird
-   voraussichtlich nicht mitgesendet und die authentifizierte Route antwortet mit 401.
-   Vorschlag: Inline-Bilder über kurzlebige signierte URLs (`URL::temporarySignedRoute`), in
-   Schritt 4 im Browser verifizieren.
-9. **ClickUp-Feldname.** Die Spezifikation nennt `markdown_description` für `createTask`. In
-   Schritt 5 gegen die aktuelle ClickUp-API prüfen (dort heisst das Feld je nach Endpunkt auch
-   `markdown_content`).
-10. **Retention und Kategorie.** Scheitert das Kategorie-Update nach `created` und wird das Item
-    nach 30 Tagen gelöscht, importiert der nächste Poll die Mail erneut. Vorschlag: gescheitertes
-    Kategorie-Update als eigener Retry-Job, Item erst löschen, wenn die Kategorie gesetzt ist.
-11. **Referenz `guc.newsletter`** liegt lokal nicht vor. Versionen habe ich gegen
-    `guc.bexio-abgleich` (Laravel 13.38, Filament 5.11) geprüft.
-12. **Grösse von Anhängen.** Keine Obergrenze genannt. Vorschlag: konfigurierbares Limit
-    (Standard 50 MB je Anhang), grössere als Link-Hinweis in der Beschreibung und mit `error`
-    an der Zeile.
+- Datenmodell `users`: zusätzlich `ms_refresh_token` (verschlüsselt), `ms_connection_status`,
+  `clickup_token` (verschlüsselt), `clickup_connection_status`, `last_clickup_list_id`.
+  `mailbox_upn` kommt aus dem Login.
+- Neue Tabelle `settings` (verschlüsselte Werte) für App-Registration und ClickUp-OAuth-App.
+- `intake:poll` dispatcht nur für User mit gültiger Microsoft-Verbindung.
+- `intake:setup-categories` entfällt als Pflicht-Schritt, läuft automatisch beim Login. Der
+  Command bleibt für Reparaturen.
+- ClickUp-Client arbeitet je User-Token, Cache und Rate-Limit je User.
+- `docs/02-setup.md` beschreibt den Assistenten statt Portal-Klicks und PowerShell.
