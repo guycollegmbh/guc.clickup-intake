@@ -20,6 +20,7 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
   Graph-Client (mit dem Admin-Token). Token-Erneuerung je Dienst an genau einer Stelle. Kein `Http::` und kein SDK-Aufruf daneben. Retry, Backoff
   (`Retry-After` bei 429 und 503) und das ClickUp-Limit (100 Requests pro Minute pro Token) liegen
   ausschliesslich in diesen Clients.
+  OAuth-Endpunkte von Entra nur in `UserTokens`, Socialite und `Setup/DeviceCodeLogin`, ohne Retry.
 - **R5 Streamen statt laden.** Attachment-Inhalte von Graph werden gestreamt auf Disk geschrieben,
   nie komplett in den Speicher.
 
@@ -29,6 +30,8 @@ Entscheid in `docs/01-decisions.md`, nicht nur eine Änderung im Code.
   endet in Status `failed` mit Fehlertext. `failed` und `pending` werden nie automatisch gelöscht.
 - **R7 Dedupe** über `(user_id, internet_message_id)` mit eindeutigem Index (E6). Graph über `/me`.
   `graph_message_id` ist veränderlich (Move) und nur Referenz, nie Schlüssel.
+  Ersatzschlüssel (E8): `graph:{immutableId}` ohne Message-ID, `{Message-ID}#{immutableId}` für eine
+  andere Mail mit gleicher Message-ID.
 - **R8 Datei und Zeile sind eine Einheit.** Erst `intake_attachments`-Zeile ohne `storage_path`,
   dann Datei schreiben, dann `storage_path` setzen. Scheitert das Schreiben: Zeile mit `error`.
   Löschen nur über das Item (Model-Event löscht `intake/{item_id}`). Pfade aus IDs, nie aus
