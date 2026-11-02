@@ -105,8 +105,8 @@ Code, Security und Architektur: nichts kritisch, ein Befund hoch. Behoben, Entsc
   Teildateien, wenn sie älter als 15 Minuten sind.
 - Verzeichnis des Items wird erst nach dem Commit gelöscht.
 - Kategorie-Vertrag: jeder Statuswechsel setzt `outlook_category_synced_at` auf null. Hängende
-  Items meldet `intake:prune` mit Fehler, nach 60 Tagen werden sie trotzdem gelöscht (zur
-  Bestätigung).
+  Items meldet `intake:prune` mit Fehler, nach 60 Tagen werden sie trotzdem gelöscht
+  (bestätigt).
 - `strictAuthorization()` im Panel, alle Policy-Methoden explizit, `IntakeAttachmentPolicy`,
   `IntakeItemPolicy::process` (nur `pending` und `failed`).
 - Disk `local` ohne `serve`, keine signierte Route `/storage`.
@@ -121,4 +121,3 @@ Code, Security und Architektur: nichts kritisch, ein Befund hoch. Behoben, Entsc
   Backup `storage/app/intake`, in Schritt 7 angleichen.
 - Statusübergänge an einer Stelle folgen mit Schritt 3 bis 5. Diese Stelle leert
   `outlook_category_synced_at` bei jedem Statuswechsel und setzt es nach dem Kategorie-Update.
-- Retention-Obergrenze 60 Tage: Bestätigung des Inhabers ausstehend (E7).

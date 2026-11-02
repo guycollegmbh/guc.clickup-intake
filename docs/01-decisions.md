@@ -177,7 +177,7 @@ Aus den Reviews zu Schritt 2. Ergänzt Schritt 2 und 3 der Spezifikation.
 - **Retention-Obergrenze:** Erledigte Items ohne synchronisierte Kategorie gelten nach 30 Tagen als
   hängend (`intake:prune` meldet sie und endet mit Fehler). Nach 60 Tagen
   (`intake.retention_hard_limit_days`) werden sie trotzdem gelöscht, mit Log-Eintrag nur mit
-  Item- und User-ID. **Zur Bestätigung durch den Inhaber.**
+  Item- und User-ID. Bestätigt durch den Inhaber am 2026-11-02.
 - **referenceAttachment** (Variante a): nur Name als Zeile ohne Datei, in der Triage mit Hinweis
   «Link in der Original-Mail». Keine Spalte für die URL, kein Beta-Endpunkt.
 - **Fehlende `internetMessageId`:** Ersatzschlüssel wird in Schritt 3 festgelegt. Vorschlag
@@ -193,6 +193,9 @@ Aus den Reviews zu Schritt 2. Ergänzt Schritt 2 und 3 der Spezifikation.
 
 - **Security-Hinweis für Schritt 3:** Eine gleiche Message-ID mit abweichender Mail (z. B. anderer
   Absender oder Betreff) wird nicht still übersprungen, sondern sichtbar gemacht.
+- **referenceAttachment Variante a** bestätigt durch den Inhaber am 2026-11-02.
+- **Kein manuelles Löschen von Items**, auch nicht für Admins und nicht für `failed` (Inhaber,
+  2026-11-02). Items verschwinden nur über die Retention, `failed` wird über «Verwerfen» erledigt.
 
 ---
 
