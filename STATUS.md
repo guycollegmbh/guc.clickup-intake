@@ -18,7 +18,7 @@ Stand 2026-11-02, Branch `develop`.
 
 - Laravel 13.39, Filament 5.11, Livewire 4, Pest 5.
 - Panel unter `/`, Login nur über Microsoft (`/login`, `/auth/microsoft`, Callback).
-  Zugangsdaten der Entra-App aus `settings` (verschlüsselt) oder `.env` als Fallback.
+  Zugangsdaten der Entra-App nur aus `settings` (verschlüsselt).
 - Delegierte Scopes beim Login angefordert, Refresh-Token verschlüsselt am User.
 - Theme: Primary `#00AEEF`, Dark `#231F20`, Source Sans 3 lokal, Radius 0, keine Schatten.
 - `users` nach E1 bis E3 erweitert, `settings`-Tabelle. Passwort-Spalten entfernt.
