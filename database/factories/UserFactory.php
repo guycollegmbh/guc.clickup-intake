@@ -24,6 +24,9 @@ class UserFactory extends Factory
             'entra_object_id' => (string) Str::uuid(),
             'role' => Role::Member,
             'active' => true,
+            // Database defaults, set here so a factory model has them without a reload.
+            'ms_connection_status' => ConnectionStatus::Disconnected,
+            'clickup_connection_status' => ConnectionStatus::Disconnected,
         ];
     }
 

@@ -32,6 +32,12 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 - Commands: `intake:poll` (alle 2 Minuten), `intake:prune` (täglich), `intake:orphans`,
   `intake:setup-categories {upn?}`.
 - `app/Policies/`: Items (member eigene, admin alle), Regeln (nur admin).
+- `app/Intake/`: Import, Statusübergänge (`ItemTransitions`), Triage-Aktionen
+  (`TriageActions`), `RuleMatcher`, `TaskName`, `MailMarkdown`.
+- `app/Filament/Resources/`: «Eingang» (Triage-Seite `TriageIntakeItem`), «Benutzer».
+- `app/Http/Controllers/MailContentController.php`: Original-HTML, Inline-Bilder (signiert),
+  Downloads. Mail-HTML nur dort, nie im Panel.
+- `app/Users/UserAdministration.php`: Rolle, Deaktivieren, Aktivieren.
 - `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
 - `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Intake\RuleMatcher;
 use Filament\Support\Facades\FilamentTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Event;
@@ -13,7 +14,8 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        // Rules are loaded once per request or job (triage table).
+        $this->app->scoped(RuleMatcher::class);
     }
 
     public function boot(): void

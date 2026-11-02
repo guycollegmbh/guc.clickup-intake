@@ -9,7 +9,7 @@ Stand 2026-11-02, Branch `develop`.
 | 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, im Tenant geprüft |
 | 2 | Datenmodell Intake | umgesetzt, Review-Befunde behoben |
 | 3 | Intake über Graph | umgesetzt, Reviews offen |
-| 4 | Triage in Filament | offen |
+| 4 | Triage in Filament (ohne ClickUp-Teile) | umgesetzt, Reviews offen |
 | 5 | ClickUp-Client und OAuth je User | offen |
 | 6 | Tests | laufend je Schritt |
 | 7 | Doku und Abschluss | offen |
@@ -181,14 +181,74 @@ Gegen den Tenant noch zu prüfen:
 - Streaming über Guzzle nutzt bei `allow_url_fopen=On` den Stream-Handler, sonst schreibt cURL
   in einen temporären Stream. Auf vps06 prüfen.
 
+## Schritt 4
+
+Ohne ClickUp-Teile (List, Assignees, Due Date, Priorität, Kommentar-Option, «Task erstellen»,
+Resource «Regeln»), die folgen in Schritt 5 auf derselben Triage-Seite.
+
+- `app/Intake/TaskName.php`: Betreff ohne führende `Re:`, `AW:`, `WG:`, `Fwd:`, `FW:` (mehrfach,
+  gemischt, ohne Gross-/Kleinschreibung), leer wird «(ohne Betreff)».
+- `app/Intake/RuleMatcher.php`: erste aktive Rule nach `IntakeRule::ordered()`. `from_domain`
+  exakt, ohne Subdomains, führendes `@` wird ignoriert. `from_email` exakt, `subject_contains`
+  Teilstring, alles ohne Gross-/Kleinschreibung. Leerer Wert passt nie. Als `scoped` gebunden,
+  Rules einmal je Request.
+- `app/Intake/MailMarkdown.php` und `SafeLinkConverter.php`: HTML zu Markdown mit
+  `league/html-to-markdown`. Entfernt head, script, style, Bilder, eingebettete Inhalte, übrige
+  Tags ohne Markdown-Form werden entfernt (Text bleibt). Links nur http, https, mailto, sonst nur
+  der Text. Jedes `<`, das ein Tag beginnen könnte, wird `&lt;`. Zellen von Layout-Tabellen
+  getrennt. Signaturen und Zitate bleiben.
+- `ItemTransitions`: `discard`, `markForwarded`, `markFailed` (bedingt, aus `pending` und
+  `failed`, `imported_at` bleibt).
+- `app/Intake/TriageActions.php`: Verwerfen und Weiterleiten, prüft selbst die Policy `process`.
+  Weiterleiten mit dem Token des Postfach-Inhabers, Kommentar nennt den Handelnden, Empfänger nur
+  `INTAKE_SUPPORT_ADDRESS` (ohne gültige Adresse keine Aktion). Erst Graph, dann Status.
+  Fehler: `failed` mit Text. Kategorie-Fehler: Status bleibt, Sync später durch den Poll.
+- Resource «Eingang» (`/eingang`): Tabelle ohne Bodies, Anhänge ohne inline und Links,
+  vorbelegte List (Rule, sonst `last_clickup_list_label` des Inhabers), Filter Status (Vorgabe
+  Offen), Admins mit Spalte und Filter «Benutzer». Bulk «Verwerfen» je Item mit `process`.
+- Triage-Seite (`/eingang/{id}`, View-Seite): Kopf, Taskname, Beschreibung (Markdown-Editor ohne
+  Upload), Anhänge als Checkbox-Liste (Vorgabe `selected_for_upload`, Links und fehlerhafte nicht
+  wählbar). Werte nur in `$data`, gespeichert wird erst mit «Task erstellen» (Schritt 5). Aktionen
+  «An Support weiterleiten», «Verwerfen», «In Outlook öffnen» (nur https, neues Fenster,
+  `rel="noopener noreferrer"`).
+- Routen ausserhalb des Panels (`MailContentController`): `/mail/{item}/original` (auth, Policy,
+  CSP ohne Script, `sandbox`), `/mail/{item}/inline/{attachment}` (nur signiert, 10 Minuten,
+  nur Bilder nach finfo, kein SVG), `/mail/attachments/{id}` (auth, Policy, immer Download,
+  `application/octet-stream`, `nosniff`, `CSP: sandbox`, bereinigter Name).
+- Runde 1, Punkt 8 im Browser geprüft (Chrome und WebKit, Testseite mit gleichen Headern):
+  Das iframe-Dokument erhält das Session-Cookie, die Bildanfragen aus dem Sandbox-iframe in
+  Chrome nicht, darum signierte URLs. WebKit lässt `img-src 'self'` im Sandbox-Dokument nicht
+  gelten, darum steht der Origin von `APP_URL` zusätzlich in `img-src`. Externe Bilder blockiert,
+  Script nicht ausgeführt.
+- Resource «Benutzer» (`/benutzer`, nur Admin, `UserPolicy`): Rolle ändern, Deaktivieren (löscht
+  Microsoft- und ClickUp-Tokens, Status getrennt), Aktivieren. Nicht für sich selbst.
+  `app/Users/UserAdministration.php` prüft die Policy selbst.
+- Banner bei unterbrochener Microsoft-Verbindung (Render-Hook) mit Knopf «Abmelden».
+- Filament-Texte auf Deutsch, Overrides in `lang/vendor/` für «Schliessen» (ss statt ß).
+- 350 Tests grün.
+
+Detailentscheide:
+
+- Verwerfen und Weiterleiten mit Bestätigungsdialog. Nach Erfolg zurück in den Eingang.
+- Der Fehlertext eines `failed`-Items bleibt beim Verwerfen erhalten.
+- Bilder werden nicht in die Beschreibung übernommen (inline sind Anhänge, externe wären
+  Tracking im Editor und in ClickUp).
+- Weiterleiten ist auch für ein `failed`-Item eines Import-Fehlers möglich. Scheitert es dort,
+  bleibt `imported_at` leer und der Poll importiert wie bisher neu.
+
+Offen aus Schritt 4:
+
+- Sichtprüfung im Browser (hell, dunkel, Handybreite) braucht einen Microsoft-Login, mit dem
+  Inhaber.
+- Der Standardfilter «Offen» blendet `failed` aus (Spezifikation). Vorschlag: Vorgabe «Offen und
+  Fehlgeschlagen», braucht einen Entscheid.
+- Firefox nicht geprüft (Headless-Start im Sandkasten nicht möglich).
+
 ## Offen und bekannt
 
-- Warnung vor Ablauf des Secrets und Admin-Seite «Microsoft 365» folgen mit Schritt 4 bzw. 7.
+- Warnung vor Ablauf des Secrets und Admin-Seite «Microsoft 365» folgen mit Schritt 7.
 - `.env.production.example` bzw. Deploy-Checkliste folgt in Schritt 7 (`docs/02-setup.md`).
 - Anhänge liegen unter `storage/app/private/intake` (Wurzel der Disk `local`). E4 nennt für das
   Backup `storage/app/intake`, in Schritt 7 angleichen.
-- Beim Deaktivieren eines Users müssen seine Microsoft- und ClickUp-Tokens gelöscht werden.
-  Kommt mit der Admin-Aktion in Schritt 4. Bis dahin verweigert `UserTokens` inaktiven Usern
-  jeden Token.
 - R4 und R7 in `.claude/rules/intake.md` sind noch nicht um E8 ergänzt (Regeldatei, Änderung
   durch den Inhaber).

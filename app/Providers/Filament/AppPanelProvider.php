@@ -2,6 +2,8 @@
 
 namespace App\Providers\Filament;
 
+use App\Enums\ConnectionStatus;
+use App\Models\User;
 use Filament\FontProviders\LocalFontProvider;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -11,12 +13,14 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AppPanelProvider extends PanelProvider
@@ -62,6 +66,14 @@ class AppPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            // Broken Microsoft connection of the signed-in user (E1): the next sign-in repairs it.
+            ->renderHook(PanelsRenderHook::PAGE_START, function (): string {
+                $user = Auth::user();
+
+                return $user instanceof User && $user->ms_connection_status === ConnectionStatus::Broken
+                    ? view('filament.microsoft-broken-banner')->render()
+                    : '';
+            })
             // Every resource needs a policy with every ability Filament asks for (R12).
             ->strictAuthorization();
     }

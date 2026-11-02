@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Log;
  * - outlook_category_synced_at is set only by syncCategory(), after Outlook confirms the
  *   category of the status.
  *
- * Steps 4 and 5 add the transitions to creating, created, forwarded and discarded here.
+ * Step 5 adds the transitions to creating and created here.
  */
 class ItemTransitions
 {
@@ -65,6 +65,39 @@ class ItemTransitions
     public function backToPending(IntakeItem $item): bool
     {
         return $this->transition($item, IntakeStatus::Pending, [IntakeStatus::Discarded], ['error' => null]);
+    }
+
+    /**
+     * Discarded in triage (R10: syncCategory() then removes "ClickUp"). Only from pending or
+     * failed, so a parallel action is never overwritten. The error text of a failed item stays.
+     */
+    public function discard(IntakeItem $item, User $actor): bool
+    {
+        return $this->transition($item, IntakeStatus::Discarded, [IntakeStatus::Pending, IntakeStatus::Failed], actor: $actor);
+    }
+
+    /**
+     * The mail was forwarded to the support address (R14). syncCategory() then sets
+     * "Support ✓".
+     */
+    public function markForwarded(IntakeItem $item, User $actor): bool
+    {
+        return $this->transition($item, IntakeStatus::Forwarded, [IntakeStatus::Pending, IntakeStatus::Failed], [
+            'error' => null,
+        ], actor: $actor);
+    }
+
+    /**
+     * A triage action failed (R6). imported_at is left as it is: an imported item is never
+     * imported again by the poll (E8).
+     *
+     * @param  string  $error  German text, shown in triage
+     */
+    public function markFailed(IntakeItem $item, string $error): bool
+    {
+        return $this->transition($item, IntakeStatus::Failed, [IntakeStatus::Pending, IntakeStatus::Failed], [
+            'error' => $error,
+        ]);
     }
 
     /**
