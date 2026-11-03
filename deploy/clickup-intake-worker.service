@@ -1,0 +1,19 @@
+# /etc/systemd/system/clickup-intake-worker.service
+[Unit]
+Description=ClickUp-Intake queue worker (Redis)
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=clickupintake
+Group=clickupintake
+WorkingDirectory=/var/www/clickup-intake
+# --timeout below retry_after (360 s, config/queue.php); jobs set their own timeouts (300 s).
+ExecStart=/usr/bin/php artisan queue:work redis --sleep=3 --timeout=330 --max-time=3600 --memory=256
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/clickup-intake/worker.log
+StandardError=append:/var/log/clickup-intake/worker.log
+
+[Install]
+WantedBy=multi-user.target

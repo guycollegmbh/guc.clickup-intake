@@ -1,0 +1,11 @@
+/* Standalone pages outside the Filament panel (login, setup). */
+@import 'tailwindcss';
+@import '@fontsource-variable/source-sans-3';
+
+@source '../views/**/*.blade.php';
+
+@theme {
+    --font-sans: 'Source Sans 3 Variable', ui-sans-serif, system-ui, sans-serif;
+    --color-brand: #00aeef;
+    --color-brand-dark: #231f20;
+}

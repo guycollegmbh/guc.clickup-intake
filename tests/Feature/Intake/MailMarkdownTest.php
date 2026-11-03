@@ -1,0 +1,131 @@
+<?php
+
+use App\Intake\MailMarkdown;
+use App\Intake\SafeLinkConverter;
+use League\HTMLToMarkdown\HtmlConverter;
+
+function markdown(string $html, ?string $fallback = null): string
+{
+    return (new MailMarkdown)->convert($html, $fallback);
+}
+
+it('drops script, style and head with their content', function () {
+    $result = markdown('<html><head><title>Titel</title><style>p{color:red}</style></head><body><p>Guten Tag</p><script>alert(1)</script></body></html>');
+
+    expect($result)->toBe('Guten Tag')
+        ->not->toContain('alert')
+        ->not->toContain('color:red')
+        ->not->toContain('Titel');
+});
+
+it('leaves no raw HTML in the result', function () {
+    $result = markdown('<div><font color="red">Rot</font> <o:p>x</o:p> <span style="x">y</span> <custom-tag>z</custom-tag> &lt;script&gt;alert(1)&lt;/script&gt; <a>ohne Ziel</a></div><pre>&lt;b&gt;code&lt;/b&gt;</pre><svg><script>alert(2)</script></svg><iframe src="https://x.test"></iframe>');
+
+    expect($result)->not->toMatch('/(?<!\\\\)<[a-z\/!?]/i')
+        ->toContain('Rot')
+        ->toContain('ohne Ziel')
+        ->not->toContain('alert(2)');
+});
+
+it('removes links with javascript and data targets but keeps their text', function () {
+    $result = markdown('<p><a href="javascript:alert(1)">eins</a> <a href=" JaVa&#x09;Script:alert(1)">zwei</a> <a href="data:text/html,x">drei</a> <a href="vbscript:x">vier</a> <a href="#anker">fünf</a></p>');
+
+    expect($result)->toBe('eins zwei drei vier fünf')
+        ->not->toContain('javascript')
+        ->not->toContain('data:');
+});
+
+it('keeps http, https and mailto links', function () {
+    $result = markdown('<p><a href="https://example.test/a?b=1&amp;c=2">Seite</a> <a href="mailto:erika@example.test">erika@example.test</a> <a href="http://example.test">http://example.test</a></p>');
+
+    expect($result)->toBe('[Seite](https://example.test/a?b=1&c=2) [erika@example.test](mailto:erika@example.test) [http://example.test](http://example.test)');
+});
+
+it('drops images, including tracking pixels', function () {
+    expect(markdown('<p>Text<img src="https://tracker.test/p.gif"><img src="cid:image001.png"></p>'))->toBe('Text');
+});
+
+it('keeps signatures, quotes, lists and emphasis', function () {
+    $result = markdown('<p><b>Fett</b> und <i>kursiv</i></p><ul><li>eins</li><li>zwei</li></ul><blockquote>Zitat</blockquote><p>Freundliche Grüsse<br>Erika Beispiel</p>');
+
+    expect($result)->toBe("**Fett** und *kursiv*\n\n- eins\n- zwei\n\n> Zitat\n\nFreundliche Grüsse\nErika Beispiel");
+});
+
+it('escapes Markdown in the text so it is not read as an image or link', function () {
+    expect(markdown('<p>![x](https://tracker.test/p.gif) *fett*</p>'))->toBe('!\[x\](https://tracker.test/p.gif) \*fett\*');
+});
+
+it('separates the cells of layout tables', function () {
+    expect(markdown('<table><tr><td>Erika Beispiel</td><td>Beispiel AG</td></tr><tr><td>Tel. 000</td></tr></table>'))
+        ->toBe("Erika Beispiel Beispiel AG\nTel. 000");
+});
+
+it('falls back to the plain text without HTML', function () {
+    expect(markdown('', "Zeile <b>eins</b>\nZeile zwei"))->toBe("Zeile \\<b>eins\\</b>\nZeile zwei");
+});
+
+it('masks links and images in the plain text fallback', function () {
+    $result = markdown('', '[x](javascript:alert(1)) ![p](https://tracker.test/p.gif)');
+
+    expect($result)->toBe('\\[x\\](javascript:alert(1)) !\\[p\\](https://tracker.test/p.gif)')
+        ->not->toMatch('/(?<!\\\\)\\[[^\\]]*\\]\\(/');
+});
+
+it('shows forwarded headers readably without leaving tags', function () {
+    expect(markdown('<p><b>Von:</b> Laura Jenny &lt;ljenny@trio.ch&gt;</p>'))->toBe('**Von:** Laura Jenny \\<ljenny@trio.ch>');
+});
+
+it('keeps double-encoded Markdown syntax as entities', function () {
+    expect(markdown('<p>&amp;#91;x&amp;#93;&amp;#40;javascript:alert(1)&amp;#41;</p>'))->toBe('&#91;x&#93;&#40;javascript:alert(1)&#41;');
+});
+
+it('converts a plain text body as the import stores it', function () {
+    $body = nl2br(e("Guten Tag\n<script>alert(1)</script>\n[x](javascript:alert(1))\n\nGruss"));
+
+    expect(markdown($body))->toBe("Guten Tag\n\\<script>alert(1)\\</script>\n\\[x\\](javascript:alert(1))\n\nGruss");
+});
+
+it('survives broken HTML and falls back to the plain text', function (string $html) {
+    expect(markdown($html, 'Klartext'))->toBeString()->not->toMatch('/(?<!\\\\)<[a-z\/!?]/i');
+})->with([
+    'unclosed' => ['<p>offen <b>fett <div><a href="https://x.test">Link'],
+    'stray closing tags' => ['</p></div>Text</td></tr></table>'],
+    'garbage' => ["\x00\xff<<<>>><!-- <script>alert(1)</script>"],
+    'nested tables' => ['<table><tr><td><table><tr><td>innen</td></tr></table></td></tr></table>'],
+    'only a tag' => ['<br>'],
+]);
+
+it('cuts a very long result and marks it', function () {
+    $result = markdown('<p>'.str_repeat('Langer Text ', 180_000).'</p>');
+
+    expect(mb_strlen($result))->toBeLessThanOrEqual(MailMarkdown::MAX_LENGTH)
+        ->and($result)->toEndWith("\n\n(gekürzt)");
+});
+
+it('recognises safe link targets only', function (string $href, ?string $expected) {
+    expect(SafeLinkConverter::safeHref($href))->toBe($expected);
+})->with([
+    ['https://example.test', 'https://example.test'],
+    ['HTTP://example.test', 'HTTP://example.test'],
+    ['mailto:erika@example.test', 'mailto:erika@example.test'],
+    ['javascript:alert(1)', null],
+    ["java\tscript:alert(1)", null],
+    ['data:text/html,x', null],
+    ['//example.test', null],
+    ['/relative', null],
+    ['https:///x', null],
+]);
+
+it('logs only the exception class when the HTML cannot be converted', function () {
+    // Whether real broken HTML makes the converter throw depends on the libxml version, so the
+    // failure is forced here to test the fallback path deterministically.
+    $logs = captureLogs();
+    $converter = Mockery::mock(HtmlConverter::class);
+    $converter->shouldReceive('convert')->andThrow(new RuntimeException('failed near <script>alert(1)</script>'));
+    $markdown = new MailMarkdown;
+    (new ReflectionProperty($markdown, 'converter'))->setValue($markdown, $converter);
+
+    expect($markdown->convert('<p>x</p>', 'Klartext'))->toBe('Klartext')
+        ->and(logText($logs))->not->toContain('alert')
+        ->and(logText($logs))->toContain('RuntimeException');
+});
