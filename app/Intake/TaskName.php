@@ -10,10 +10,11 @@ final class TaskName
     public const EMPTY_SUBJECT = '(ohne Betreff)';
 
     /**
-     * Reply and forward prefixes in English and German, repeated and mixed in any case:
-     * Re, AW, WG, Fwd, FW. Only when followed by a colon, so "Rechnung: ..." stays as it is.
+     * Reply and forward prefixes, repeated and mixed in any case, also with a space before the
+     * colon (French style "Tr :"): Re, AW, WG, Fwd, FW (en/de), Tr (fr), Antw (nl), SV, VS (nordic),
+     * RV (es). Only when followed by a colon, so "Rechnung: ..." stays as it is.
      */
-    private const PREFIXES = '/^(?:\s*(?:re|aw|wg|fwd?)\s*:)+/iu';
+    private const PREFIXES = '/^(?:\s*(?:re|aw|wg|fwd?|tr|antw|sv|vs|rv)\s*:)+/iu';
 
     public static function fromSubject(?string $subject): string
     {

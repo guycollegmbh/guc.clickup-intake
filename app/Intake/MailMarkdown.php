@@ -13,8 +13,11 @@ use Throwable;
  * embedded content are dropped with their content, all other tags without a Markdown form
  * are stripped (their text stays). Links survive only with http, https or mailto
  * (SafeLinkConverter). Images are dropped, inline ones are attachments and external ones
- * would be loaded wherever the Markdown is shown (tracking). As a last line, every "<" that
- * could start a tag is written as "&lt;", also inside code blocks.
+ * would be loaded wherever the Markdown is shown (tracking). HTML entities left by the converter
+ * (e.g. "&lt;name@x.ch&gt;" in forwarded headers) are decoded for readability, then as a last line
+ * every "<" that could start a tag is escaped as "\<" (CommonMark backslash escape), also inside
+ * code blocks. Entities that encode Markdown syntax (e.g. "&#91;") stay encoded, they cannot form
+ * structure in CommonMark.
  *
  * Signatures and quoted replies stay (specification).
  */
@@ -103,7 +106,8 @@ class MailMarkdown
 
     private static function tidy(string $markdown): string
     {
-        $markdown = preg_replace('/<(?=[a-z\/!?])/i', '&lt;', $markdown) ?? $markdown;
+        $markdown = html_entity_decode($markdown, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $markdown = preg_replace('/<(?=[a-z\/!?])/i', '\\\\<', $markdown) ?? $markdown;
         $markdown = str_replace(["\r\n", "\r", "\u{00A0}"], ["\n", "\n", ' '], $markdown);
         $markdown = preg_replace('/[ \t]+$/m', '', $markdown) ?? $markdown;
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown) ?? $markdown;

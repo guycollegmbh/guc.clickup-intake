@@ -20,7 +20,7 @@ it('drops script, style and head with their content', function () {
 it('leaves no raw HTML in the result', function () {
     $result = markdown('<div><font color="red">Rot</font> <o:p>x</o:p> <span style="x">y</span> <custom-tag>z</custom-tag> &lt;script&gt;alert(1)&lt;/script&gt; <a>ohne Ziel</a></div><pre>&lt;b&gt;code&lt;/b&gt;</pre><svg><script>alert(2)</script></svg><iframe src="https://x.test"></iframe>');
 
-    expect($result)->not->toMatch('/<[a-z\/!?]/i')
+    expect($result)->not->toMatch('/(?<!\\\\)<[a-z\/!?]/i')
         ->toContain('Rot')
         ->toContain('ohne Ziel')
         ->not->toContain('alert(2)');
@@ -60,7 +60,7 @@ it('separates the cells of layout tables', function () {
 });
 
 it('falls back to the plain text without HTML', function () {
-    expect(markdown('', "Zeile <b>eins</b>\nZeile zwei"))->toBe("Zeile &lt;b&gt;eins&lt;/b&gt;\nZeile zwei");
+    expect(markdown('', "Zeile <b>eins</b>\nZeile zwei"))->toBe("Zeile \\<b>eins\\</b>\nZeile zwei");
 });
 
 it('masks links and images in the plain text fallback', function () {
@@ -70,14 +70,22 @@ it('masks links and images in the plain text fallback', function () {
         ->not->toMatch('/(?<!\\\\)\\[[^\\]]*\\]\\(/');
 });
 
+it('shows forwarded headers readably without leaving tags', function () {
+    expect(markdown('<p><b>Von:</b> Laura Jenny &lt;ljenny@trio.ch&gt;</p>'))->toBe('**Von:** Laura Jenny \\<ljenny@trio.ch>');
+});
+
+it('keeps double-encoded Markdown syntax as entities', function () {
+    expect(markdown('<p>&amp;#91;x&amp;#93;&amp;#40;javascript:alert(1)&amp;#41;</p>'))->toBe('&#91;x&#93;&#40;javascript:alert(1)&#41;');
+});
+
 it('converts a plain text body as the import stores it', function () {
     $body = nl2br(e("Guten Tag\n<script>alert(1)</script>\n[x](javascript:alert(1))\n\nGruss"));
 
-    expect(markdown($body))->toBe("Guten Tag\n&lt;script&gt;alert(1)&lt;/script&gt;\n\\[x\\](javascript:alert(1))\n\nGruss");
+    expect(markdown($body))->toBe("Guten Tag\n\\<script>alert(1)\\</script>\n\\[x\\](javascript:alert(1))\n\nGruss");
 });
 
 it('survives broken HTML and falls back to the plain text', function (string $html) {
-    expect(markdown($html, 'Klartext'))->toBeString()->not->toMatch('/<[a-z\/!?]/i');
+    expect(markdown($html, 'Klartext'))->toBeString()->not->toMatch('/(?<!\\\\)<[a-z\/!?]/i');
 })->with([
     'unclosed' => ['<p>offen <b>fett <div><a href="https://x.test">Link'],
     'stray closing tags' => ['</p></div>Text</td></tr></table>'],

@@ -24,3 +24,7 @@ it('removes reply and forward prefixes for the task name', function (?string $su
     'only prefixes' => ['Re: AW:', '(ohne Betreff)'],
     'only whitespace' => ['   ', '(ohne Betreff)'],
 ]);
+
+it('strips French and other forward prefixes, also with a space before the colon', function (string $subject) {
+    expect(TaskName::fromSubject($subject))->toBe('Budget 2027');
+})->with(['Tr : Budget 2027', 'TR: Budget 2027', 'Tr : RE: AW:Budget 2027', 'Antw: Budget 2027', 'SV: Budget 2027', 'VS: Budget 2027', 'RV: Budget 2027']);
