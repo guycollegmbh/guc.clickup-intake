@@ -2,6 +2,7 @@
 
 use App\Intake\MailMarkdown;
 use App\Intake\SafeLinkConverter;
+use League\HTMLToMarkdown\HtmlConverter;
 
 function markdown(string $html, ?string $fallback = null): string
 {
@@ -116,8 +117,15 @@ it('recognises safe link targets only', function (string $href, ?string $expecte
 ]);
 
 it('logs only the exception class when the HTML cannot be converted', function () {
+    // Whether real broken HTML makes the converter throw depends on the libxml version, so the
+    // failure is forced here to test the fallback path deterministically.
     $logs = captureLogs();
+    $converter = Mockery::mock(HtmlConverter::class);
+    $converter->shouldReceive('convert')->andThrow(new RuntimeException('failed near <script>alert(1)</script>'));
+    $markdown = new MailMarkdown;
+    (new ReflectionProperty($markdown, 'converter'))->setValue($markdown, $converter);
 
-    expect(markdown("\x00\xff<<<>>><!-- <script>alert(1)</script>", 'Klartext'))->toBe('Klartext')
-        ->and(logText($logs))->not->toContain('alert');
+    expect($markdown->convert('<p>x</p>', 'Klartext'))->toBe('Klartext')
+        ->and(logText($logs))->not->toContain('alert')
+        ->and(logText($logs))->toContain('RuntimeException');
 });
