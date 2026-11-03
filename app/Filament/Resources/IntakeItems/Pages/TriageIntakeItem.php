@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\IntakeItems\Pages;
 
+use App\ClickUp\ClickUpApp;
+use App\ClickUp\UserClickUp;
 use App\Enums\AttachmentType;
 use App\Enums\IntakeStatus;
 use App\Filament\Resources\IntakeItems\IntakeItemResource;
@@ -14,16 +16,21 @@ use App\Models\IntakeAttachment;
 use App\Models\IntakeItem;
 use App\Models\User;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\MarkdownEditor;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\EmbeddedSchema;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -31,14 +38,18 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Number;
+use Livewire\Attributes\Locked;
+use Throwable;
 
 /**
- * Triage of one mail (step 4): mail header, task fields, original in a sandboxed iframe
- * (R13) and the actions. The task fields live in $data only and are not saved here: step 5
- * adds list, assignees, due date, priority, the comment option and "Task erstellen". That
- * action only reads $this->form->getState() and passes it to
- * TriageActions::createTask($item, $actor, $draft), which stores the attachment selection.
- * The page holds no business logic.
+ * Triage of one mail (steps 4 and 5): mail header, task fields, original in a sandboxed iframe
+ * (R13) and the actions. The task fields live in $data only. "Task erstellen" reads
+ * $this->form->getState() and passes it to TriageActions::createTask($item, $actor, $draft),
+ * which stores the attachment selection. The page holds no business logic.
+ *
+ * ClickUp fields (list, assignees, due date, priority, comment) need a ClickUp connection of the
+ * acting user, lists and members are the acting user's (E2). The pre-selection comes from
+ * TriageActions::taskDefaults().
  *
  * Mail content is shown escaped only, never with {!! !!}.
  *
@@ -52,6 +63,12 @@ class TriageIntakeItem extends ViewRecord
 
     /** @var Collection<int, IntakeAttachment>|null */
     private ?Collection $listedAttachments = null;
+
+    /** @var array{lists: array<string, string>, members: array<int, string>}|null */
+    private ?array $clickUpOptions = null;
+
+    #[Locked]
+    public ?string $clickUpError = null;
 
     public function mount(int|string $record): void
     {
@@ -105,7 +122,69 @@ class TriageIntakeItem extends ViewRecord
                 ->disableOptionWhen(fn (string $value): bool => ! ($attachments->firstWhere('id', (int) $value)?->isUploadable() ?? false))
                 ->bulkToggleable()
                 ->visible($attachments->isNotEmpty()),
+            Callout::make('Verbinde dein ClickUp-Konto, um Tasks zu erstellen.')
+                ->warning()
+                ->controlActions([
+                    Action::make('connectClickUp')
+                        ->label('Mit ClickUp verbinden')
+                        ->url(route('clickup.connect')),
+                ])
+                ->visible(fn (): bool => app(ClickUpApp::class)->isConfigured() && ! $this->clickUpReady()),
+            Callout::make('ClickUp ist noch nicht eingerichtet. Ein Admin wählt den Workspace auf der Seite «ClickUp».')
+                ->info()
+                ->visible(fn (): bool => ! app(ClickUpApp::class)->isConfigured()),
+            Callout::make(fn (): string => (string) $this->clickUpError)
+                ->danger()
+                ->visible(fn (): bool => $this->clickUpError !== null && $this->clickUpReady()),
+            Select::make('list_id')
+                ->label('Ziel-List')
+                ->options(fn (): array => $this->clickUpOptions()['lists'])
+                ->searchable()
+                ->required()
+                ->hintAction(
+                    Action::make('reloadClickUp')
+                        ->label('ClickUp-Listen neu laden')
+                        ->icon(Heroicon::OutlinedArrowPath)
+                        ->action(fn () => $this->reloadClickUp()),
+                )
+                ->visible(fn (): bool => $this->clickUpReady()),
+            Select::make('assignee_ids')
+                ->label('Zuständig')
+                ->multiple()
+                ->options(fn (): array => $this->clickUpOptions()['members'])
+                ->searchable()
+                ->visible(fn (): bool => $this->clickUpReady()),
+            Grid::make(['default' => 1, 'sm' => 2])
+                ->schema([
+                    DatePicker::make('due_date')
+                        ->label('Fällig am')
+                        ->native(false)
+                        ->displayFormat('d.m.Y')
+                        ->firstDayOfWeek(1)
+                        ->closeOnDateSelection()
+                        ->hintActions([
+                            self::dueDateAction('dueToday', 'Heute', 0),
+                            self::dueDateAction('dueTomorrow', 'Morgen', 1),
+                            self::dueDateAction('dueNextWeek', 'In 1 Woche', 7),
+                        ]),
+                    Select::make('priority')
+                        ->label('Priorität')
+                        ->options(TriageActions::PRIORITIES)
+                        ->placeholder('Keine'),
+                ])
+                ->visible(fn (): bool => $this->clickUpReady()),
+            Checkbox::make('add_comment')
+                ->label('Absender und Mail-Link als Kommentar anfügen')
+                ->visible(fn (): bool => $this->clickUpReady()),
         ]);
+    }
+
+    private static function dueDateAction(string $name, string $label, int $days): Action
+    {
+        return Action::make($name)
+            ->label($label)
+            ->link()
+            ->action(fn (Set $set) => $set('due_date', now(config('intake.display_timezone'))->addDays($days)->toDateString()));
     }
 
     public function infolist(Schema $schema): Schema
@@ -183,6 +262,30 @@ class TriageIntakeItem extends ViewRecord
         $address = TriageActions::supportAddress();
 
         return [
+            Action::make('createTask')
+                ->label('Task erstellen')
+                ->icon(Heroicon::OutlinedPlusCircle)
+                ->authorize('createTask')
+                ->visible(fn (): bool => $this->clickUpReady())
+                ->action(fn () => $this->createTask()),
+            Action::make('retryUpload')
+                ->label('Fehlende Anhänge erneut hochladen')
+                ->icon(Heroicon::OutlinedArrowUpTray)
+                ->authorize('retryUpload')
+                ->visible(fn (): bool => $this->clickUpReady())
+                ->action(fn () => $this->afterAction(
+                    app(TriageActions::class)->retryUpload($this->getRecord(), $this->currentUser()),
+                    done: 'Die fehlenden Anhänge werden hochgeladen.',
+                    categoryPending: 'Die fehlenden Anhänge werden hochgeladen.',
+                )),
+            Action::make('openInClickUp')
+                ->label('In ClickUp öffnen')
+                ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+                ->color('gray')
+                ->authorize('view')
+                ->visible(fn (): bool => $this->taskUrl() !== null)
+                ->url(fn (): ?string => $this->taskUrl(), shouldOpenInNewTab: true)
+                ->extraAttributes(['rel' => 'noopener noreferrer']),
             Action::make('forwardToSupport')
                 ->label('An Support weiterleiten')
                 ->icon(Heroicon::OutlinedLifebuoy)
@@ -223,6 +326,28 @@ class TriageIntakeItem extends ViewRecord
         ];
     }
 
+    private function createTask(): void
+    {
+        $result = app(TriageActions::class)->createTask($this->getRecord(), $this->currentUser(), $this->form->getState());
+
+        if ($result !== TriageResult::Done) {
+            $this->afterAction($result, done: 'Task erstellt.', categoryPending: 'Task erstellt.');
+
+            return;
+        }
+
+        $notification = Notification::make()->title('Task erstellt.')->body('Die Anhänge werden hochgeladen.')->success();
+
+        if ($this->taskUrl() !== null) {
+            $notification->actions([
+                Action::make('openTask')->label('In ClickUp öffnen')->url($this->taskUrl(), shouldOpenInNewTab: true),
+            ]);
+        }
+
+        $notification->send();
+        $this->redirect(IntakeItemResource::getUrl('index'));
+    }
+
     private function afterAction(TriageResult $result, string $done, string $categoryPending): void
     {
         match ($result) {
@@ -233,9 +358,11 @@ class TriageIntakeItem extends ViewRecord
                 ->warning()->send(),
             TriageResult::Failed => Notification::make()->title('Fehlgeschlagen')->body($this->getRecord()->error)->danger()->persistent()->send(),
             TriageResult::Skipped => Notification::make()->title('Die Mail wurde inzwischen bearbeitet.')->warning()->send(),
+            TriageResult::NotConnected => Notification::make()->title('Bitte zuerst ClickUp verbinden.')->warning()->send(),
+            TriageResult::Busy => Notification::make()->title('ClickUp ist ausgelastet, bitte gleich erneut versuchen.')->warning()->send(),
         };
 
-        if ($result !== TriageResult::Failed) {
+        if (! in_array($result, [TriageResult::Failed, TriageResult::NotConnected, TriageResult::Busy], true)) {
             $this->redirect(IntakeItemResource::getUrl('index'));
         }
     }
@@ -252,7 +379,67 @@ class TriageIntakeItem extends ViewRecord
                 ->map(fn (IntakeAttachment $attachment): string => (string) $attachment->id)
                 ->values()
                 ->all(),
+            ...$this->clickUpDefaults(),
         ]);
+    }
+
+    /**
+     * Pre-selection from TriageActions::taskDefaults() with the acting user's lists and members.
+     *
+     * @return array<string, mixed>
+     */
+    private function clickUpDefaults(): array
+    {
+        if (! $this->clickUpReady()) {
+            return ['add_comment' => true];
+        }
+
+        ['lists' => $lists, 'members' => $members] = $this->clickUpOptions();
+
+        return app(TriageActions::class)->taskDefaults($this->getRecord(), $this->currentUser(), $lists, $members);
+    }
+
+    /**
+     * The acting user can create tasks: ClickUp is set up and their account is connected.
+     */
+    private function clickUpReady(): bool
+    {
+        return app(ClickUpApp::class)->isConfigured() && app(UserClickUp::class)->isConnected($this->currentUser());
+    }
+
+    /**
+     * Lists and members of the acting user, cached by UserClickUp for an hour. A ClickUp error
+     * leaves both empty and shows a hint.
+     *
+     * @return array{lists: array<string, string>, members: array<int, string>}
+     */
+    private function clickUpOptions(): array
+    {
+        if ($this->clickUpOptions !== null) {
+            return $this->clickUpOptions;
+        }
+
+        $clickUp = app(UserClickUp::class);
+        $actor = $this->currentUser();
+
+        try {
+            $this->clickUpOptions = ['lists' => $clickUp->lists($actor), 'members' => $clickUp->members($actor)];
+            $this->clickUpError = null;
+        } catch (Throwable) {
+            $this->clickUpOptions = ['lists' => [], 'members' => []];
+            $this->clickUpError = 'Die Listen konnten nicht von ClickUp geladen werden. Bitte neu laden.';
+        }
+
+        return $this->clickUpOptions;
+    }
+
+    private function reloadClickUp(): void
+    {
+        app(UserClickUp::class)->forget($this->currentUser());
+        $this->clickUpOptions = null;
+        $this->clickUpOptions();
+
+        Notification::make()->title('ClickUp-Listen neu geladen.')->success()->send();
     }
 
     /**
@@ -287,6 +474,8 @@ class TriageIntakeItem extends ViewRecord
             $attachment->type->label(),
             $attachment->content_type,
             Number::fileSize($attachment->size, precision: 1),
+            $attachment->uploaded_to_clickup ? 'in ClickUp' : null,
+            $attachment->upload_error !== null ? 'nicht in ClickUp: '.$attachment->upload_error : null,
         ]));
     }
 
@@ -319,6 +508,16 @@ class TriageIntakeItem extends ViewRecord
     private function outlookUrl(): ?string
     {
         $url = SafeLinkConverter::safeHref((string) $this->getRecord()->web_link);
+
+        return $url !== null && str_starts_with(strtolower($url), 'https://') ? $url : null;
+    }
+
+    /**
+     * Task link stored at creation. Only an https link is offered.
+     */
+    private function taskUrl(): ?string
+    {
+        $url = SafeLinkConverter::safeHref((string) $this->getRecord()->clickup_task_url);
 
         return $url !== null && str_starts_with(strtolower($url), 'https://') ? $url : null;
     }

@@ -10,6 +10,7 @@ use App\Policies\UserPolicy;
 use App\Users\UserAdministration;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Sleep;
@@ -58,7 +59,11 @@ it('deactivates a user and deletes all tokens', function () {
     $this->actingAs($admin);
     Livewire::test(ListUsers::class)
         ->callAction(TestAction::make('deactivate')->table($user))
-        ->assertNotified('Benutzer deaktiviert.');
+        ->assertNotified(Notification::make()
+            ->title('Benutzer deaktiviert.')
+            ->body('In ClickUp unter Settings, Apps die Freigabe ebenfalls entfernen.')
+            ->success()
+            ->persistent());
 
     $user->refresh();
     expect($user->active)->toBeFalse()

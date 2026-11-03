@@ -2,8 +2,11 @@
 
 namespace App\Providers\Filament;
 
+use App\ClickUp\ClickUpApp;
 use App\Enums\ConnectionStatus;
+use App\Filament\Resources\IntakeItems\Pages\TriageIntakeItem;
 use App\Models\User;
+use Filament\Actions\Action;
 use Filament\FontProviders\LocalFontProvider;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -13,6 +16,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -74,7 +78,38 @@ class AppPanelProvider extends PanelProvider
                     ? view('filament.microsoft-broken-banner')->render()
                     : '';
             })
+            // ClickUp not connected (E2). The triage page shows its own hint in the task form.
+            ->renderHook(PanelsRenderHook::PAGE_START, function (array $scopes): string {
+                $user = Auth::user();
+
+                if (! $user instanceof User || $user->clickup_connection_status === ConnectionStatus::Connected
+                    || in_array(TriageIntakeItem::class, $scopes, true) || ! app(ClickUpApp::class)->isConfigured()) {
+                    return '';
+                }
+
+                return view('filament.clickup-connect-banner', ['broken' => $user->clickup_connection_status === ConnectionStatus::Broken])->render();
+            })
+            ->userMenuItems([
+                Action::make('clickupConnect')
+                    ->label('Mit ClickUp verbinden')
+                    ->icon(Heroicon::OutlinedLink)
+                    ->url(fn (): string => route('clickup.connect'))
+                    ->visible(fn (): bool => self::clickUpStatus() !== ConnectionStatus::Connected && app(ClickUpApp::class)->hasCredentials()),
+                Action::make('clickupDisconnect')
+                    ->label('ClickUp trennen')
+                    ->icon(Heroicon::OutlinedLinkSlash)
+                    ->url(fn (): string => route('clickup.disconnect'))
+                    ->postToUrl()
+                    ->visible(fn (): bool => self::clickUpStatus() === ConnectionStatus::Connected),
+            ])
             // Every resource needs a policy with every ability Filament asks for (R12).
             ->strictAuthorization();
+    }
+
+    private static function clickUpStatus(): ?ConnectionStatus
+    {
+        $user = Auth::user();
+
+        return $user instanceof User ? $user->clickup_connection_status : null;
     }
 }

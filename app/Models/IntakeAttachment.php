@@ -43,6 +43,7 @@ class IntakeAttachment extends Model
             'is_inline' => 'boolean',
             'selected_for_upload' => 'boolean',
             'uploaded_to_clickup' => 'boolean',
+            'upload_uncertain' => 'boolean',
         ];
     }
 

@@ -340,7 +340,7 @@ it('drops the access token when Graph rejects it on forwarding', function () {
 it('sends no second forward while the item is locked', function () {
     $item = triageItem();
     Http::fake();
-    $lock = Cache::lock('intake:forward:'.$item->id, 60);
+    $lock = Cache::lock(TriageActions::lockName($item->id), 60);
     $lock->get();
 
     expect(app(TriageActions::class)->forwardToSupport($item, $item->user))->toBe(TriageResult::Skipped);
@@ -360,7 +360,7 @@ it('reports a forward as skipped when the status changed during the request', fu
 
     expect(app(TriageActions::class)->forwardToSupport($item, $item->user))->toBe(TriageResult::Skipped)
         ->and($item->fresh()->status)->toBe(IntakeStatus::Discarded);
-    expect(Cache::lock('intake:forward:'.$item->id, 1)->get())->toBeTrue();
+    expect(Cache::lock(TriageActions::lockName($item->id), 1)->get())->toBeTrue();
 });
 
 it('offers only discarding for a failed import, so the poll can still import it', function () {

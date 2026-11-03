@@ -49,6 +49,18 @@ class UserFactory extends Factory
         ]);
     }
 
+    /**
+     * ClickUp connected (E2), member 501 in tests/Support/FakeClickUp.
+     */
+    public function clickUpConnected(string $token = 'clickup-token', int $memberId = 501): static
+    {
+        return $this->state(fn (): array => [
+            'clickup_token' => $token,
+            'clickup_connection_status' => ConnectionStatus::Connected,
+            'clickup_member_id' => (string) $memberId,
+        ]);
+    }
+
     public function inactive(): static
     {
         return $this->state(fn (): array => ['active' => false]);

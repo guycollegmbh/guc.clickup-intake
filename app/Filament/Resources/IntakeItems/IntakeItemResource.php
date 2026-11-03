@@ -165,7 +165,7 @@ class IntakeItemResource extends Resource
 
     /**
      * List label of the first matching rule, otherwise the last list of the mailbox owner.
-     * The ClickUp select of step 5 uses the same order.
+     * The triage page uses the same order, with the last list of the acting user (E10).
      */
     public static function preselectedListLabel(IntakeItem $item): ?string
     {

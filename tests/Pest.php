@@ -1,5 +1,6 @@
 <?php
 
+use App\ClickUp\ClickUpApp;
 use App\Microsoft\MicrosoftApp;
 use App\Models\Setting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -20,6 +21,20 @@ function configureMicrosoftApp(): void
     Setting::put(MicrosoftApp::SETTING_TENANT_ID, TEST_TENANT_ID);
     Setting::put(MicrosoftApp::SETTING_CLIENT_ID, 'client-id');
     Setting::put(MicrosoftApp::SETTING_CLIENT_SECRET, 'client-secret');
+}
+
+/**
+ * ClickUp OAuth app and the workspace of tests/Support/FakeClickUp.
+ */
+function configureClickUpApp(bool $withWorkspace = true): void
+{
+    Setting::put(ClickUpApp::SETTING_CLIENT_ID, 'clickup-client-id');
+    Setting::put(ClickUpApp::SETTING_CLIENT_SECRET, 'clickup-client-secret');
+
+    if ($withWorkspace) {
+        Setting::put(ClickUpApp::SETTING_TEAM_ID, '9001');
+        Setting::put(ClickUpApp::SETTING_TEAM_NAME, 'GUYCOLLE Test');
+    }
 }
 
 /**

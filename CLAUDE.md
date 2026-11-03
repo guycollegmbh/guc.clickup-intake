@@ -27,19 +27,26 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 - `app/Intake/`: `MessageImporter` (Import und Dedupe nach E7 und E8), `MailboxPoller`,
   `ItemTransitions` (einzige Stelle für Statuswechsel, bedingte Updates), `AttachmentStore`
   (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf Disk `local`), `Retention`,
-  `TriageActions` (Verwerfen, Weiterleiten, prüft die Policy selbst), `RuleMatcher`, `TaskName`,
-  `MailMarkdown` mit `SafeLinkConverter`.
+  `TriageActions` (Task erstellen, erneut hochladen, Verwerfen, Weiterleiten, prüft die Policy
+  selbst, Sperre je Item), `TaskUploads` (Anhänge und Kommentar nach ClickUp), `RuleMatcher`,
+  `TaskName`, `MailMarkdown` mit `SafeLinkConverter`.
 - `app/Jobs/`: `PollMailbox` (eindeutig je User), `SetupOutlookCategories` (nach Login),
-  `SyncOutlookCategory` (eindeutig je Item, nach Bulk-Verwerfen). Payload nur IDs.
-- Commands: `intake:poll` (alle 2 Minuten), `intake:prune` (täglich), `intake:orphans`,
+  `SyncOutlookCategory` (eindeutig je Item, nach Bulk-Verwerfen), `UploadTaskAttachments`
+  (eindeutig je Item). Payload nur IDs.
+- Commands: `intake:poll` (alle 2 Minuten, macht hängende `creating` zu `failed`),
+  `intake:prune` (täglich), `intake:orphans`,
   `intake:setup-categories {upn?}`.
-- `app/Policies/`: Items (member eigene, admin alle, `process` und `forward`), Regeln und
-  Benutzer (nur admin).
-- `app/Filament/Resources/`: «Eingang» (Triage-Seite `TriageIntakeItem`), «Benutzer».
+- `app/Policies/`: Items (member eigene, admin alle, `process`, `forward`, `createTask`,
+  `retryUpload`), Regeln und Benutzer (nur admin).
+- `app/Filament/Resources/`: «Eingang» (Triage-Seite `TriageIntakeItem`), «Regeln», «Benutzer».
+  `app/Filament/Pages/ClickUpSettings.php`: Admin-Seite «ClickUp».
 - `app/Http/Controllers/MailContentController.php`: Original-HTML, Inline-Bilder (signiert),
-  Downloads. Mail-HTML nur dort, nie im Panel.
+  Downloads. Mail-HTML nur dort, nie im Panel. `ClickUpConnectionController`: OAuth je User.
 - `app/Users/UserAdministration.php`: Rolle, Deaktivieren, Aktivieren.
-- `app/ClickUp/`: ab Schritt 5 ClickUp-Client und OAuth.
+- `app/ClickUp/`: `ClickUpClient` (einziger ClickUp-Zugang, an ein User-Token gebunden,
+  Rate-Limit je Token im Cache), `UserClickUp` (Token je User an genau einer Stelle, Verbinden,
+  Trennen, 401, Cache für Listen und Mitglieder), `ClickUpApp` (OAuth-App und Workspace aus
+  `settings`). Admin-Seite «ClickUp» unter `/clickup`, OAuth-Routen `/clickup/*`.
 - `app/Models/Setting.php`: verschlüsselte Schlüssel/Wert-Ablage für Laufzeit-Konfiguration.
 - `config/intake.php`: App-Konfiguration inkl. delegierter Microsoft-Scopes.
 
@@ -76,6 +83,7 @@ Tests verbieten echte HTTP-Aufrufe (`Http::preventStrayRequests()` in `tests/Pes
 
 - UI Deutsch (Schweizer Hochdeutsch, ss statt ß, keine Gedankenstriche, keine Semikolons).
 - Code, Kommentare, Commits, Branches Englisch. Conventional Commits.
+- Validierungsmeldungen deutsch in `lang/de/validation.php` (nur die genutzten Regeln).
 - Gearbeitet wird auf `develop`. `main` bleibt bis zum ersten Deploy unberührt.
 - Keine KI-Komponente in V1. Keine Kopplung zum Ticketsystem guycolle.help.
 

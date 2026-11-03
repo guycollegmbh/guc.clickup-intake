@@ -10,7 +10,7 @@ Stand 2026-11-03, Branch `develop`.
 | 2 | Datenmodell Intake | umgesetzt, Review-Befunde behoben |
 | 3 | Intake über Graph | umgesetzt, Reviews offen |
 | 4 | Triage in Filament (ohne ClickUp-Teile) | umgesetzt, Review-Befunde behoben |
-| 5 | ClickUp-Client und OAuth je User | offen |
+| 5 | ClickUp-Client, OAuth je User, Task erstellen, Regeln | umgesetzt, echter Test erfolgreich, Review-Befunde behoben |
 | 6 | Tests | laufend je Schritt |
 | 7 | Doku und Abschluss | offen |
 
@@ -267,6 +267,94 @@ Offen aus Schritt 4:
 - Sichtprüfung im Browser (hell, dunkel, Handybreite) braucht einen Microsoft-Login, mit dem
   Inhaber.
 - Firefox für die Inline-Bilder ungeprüft (E9).
+
+## Schritt 5
+
+- `app/ClickUp/ClickUpClient.php`: einziger ClickUp-Zugang (R4), an das Token eines Users
+  gebunden (Bearer). Rate-Limit 100 je Minute und Token im Cache (Schlüssel als Hash),
+  429 wartet nach `X-RateLimit-Reset` bzw. `Retry-After` (höchstens 60 s), 503 und 504 nur bei
+  GET wiederholt. `ClickUpException` nur mit Status und `ECODE`. Uploads streamen aus der Datei
+  (R5), bei 429 wird die Datei neu geöffnet. Code-Tausch `exchangeCode()` ohne Wiederholung.
+- `app/ClickUp/UserClickUp.php`: einzige Stelle für Token je User. Client nur für aktive,
+  verbundene User. 401 setzt «unterbrochen» und löscht nur den abgelehnten Token. Verbinden prüft
+  `GET /user` und `GET /team` (App-Workspace), Trennen, Hierarchie und Mitglieder 1 h je User.
+- `app/ClickUp/ClickUpApp.php`: Client-ID, Secret, Workspace verschlüsselt in `settings`,
+  Redirect-URL aus `APP_URL`. Admin-Seite «ClickUp» (`/clickup`, nur Admin, auch je Livewire-
+  Request): Client-ID, Secret (leer = unverändert, nie angezeigt), Redirect-URL, Workspace aus
+  dem eigenen ClickUp-Konto, Status.
+- OAuth: `/clickup/connect`, `/clickup/callback` (state in der Session, einmalig),
+  `POST /clickup/disconnect`. Banner «Verbinde dein ClickUp-Konto, um Tasks zu erstellen.» (nicht
+  auf der Triage-Seite, die einen eigenen Hinweis hat), Benutzermenü «Mit ClickUp verbinden»
+  bzw. «ClickUp trennen».
+- Triage-Seite: Ziel-List, Zuständig, Fällig am (Schnellwahl), Priorität, Kommentar-Option,
+  «ClickUp-Listen neu laden». Aktionen «Task erstellen», «Fehlende Anhänge erneut hochladen»
+  (Ability `retryUpload`), «In ClickUp öffnen». Anhänge zeigen den Upload-Stand.
+- `TriageActions::createTask()` und `retryUpload()`, Policy `createTask` (wie Weiterleiten, nur
+  importierte Items). Sperre je Item jetzt `intake:item:{id}` für Weiterleiten und Task.
+- `ItemTransitions`: `startCreating`, `recordTask`, `failCreating`, `markCreated`,
+  `markUploadFailed`, `retryUpload`, `touchCreating`, `failStaleCreating` (läuft in
+  `intake:poll`).
+- `app/Intake/TaskUploads.php` und Job `UploadTaskAttachments` (eindeutig je Item, nur die ID im
+  Payload, Timeout 300 s, `failed()` hinterlässt einen Teilerfolg).
+- Migration: `intake_items.clickup_comment_requested`, `clickup_comment_added_at`.
+- Resource «Regeln» (`/regeln`, nur Admin): Liste nach Reihenfolge, Ziehen ändert `priority`,
+  neue Regeln ans Ende, Domain und Adresse validiert, List und Zuständige aus der Verbindung des
+  Admins, Label gespeichert.
+- `lang/de/validation.php`: deutsche Meldungen ohne Feldnamen (vorher erschien der Schlüssel,
+  z. B. «validation.required»).
+- Benutzer-Resource geprüft: ClickUp-Status vorhanden, Deaktivieren löscht den ClickUp-Token.
+- Echter Test beim Inhaber am 2026-11-03 (lokal, `http://localhost:8001`): OAuth verbunden
+  (Code-Tausch per Query-String und Bearer funktionieren), Workspace gewählt, Task mit 2 Anhängen
+  und Kommentar in «Kunden / CRK» angelegt, Item `created`, Kategorie synchronisiert.
+
+Detailentscheide in E10.
+
+## Reviews nach Schritt 5
+
+Behoben (Code, Security, Architektur):
+
+- Unklare Uploads und Kommentare (Verbindungsabbruch, 503, 504) werden markiert
+  (`intake_attachments.upload_uncertain`, `intake_items.clickup_comment_uncertain`) und vor dem
+  erneuten Senden mit `GET /task/{id}` bzw. `GET /task/{id}/comment` abgeglichen. Scheitert der
+  Abgleich, nennt der Fehlertext den Eintrag (mittel).
+- Vorbelegung als `TriageActions::taskDefaults()`, die Triage-Seite füllt nur das Formular (mittel).
+- Zeitbudget des Upload-Jobs: Folgejob statt Timeout, `failed()` nennt die fehlenden Anhänge.
+- Task angelegt, aber nicht gespeichert: Log mit Task-ID und URL, Item `failed` mit der URL.
+- Rate-Limiter zählt atomar (`hit()`), im Web-Request höchstens 5 s Wartezeit, «Task erstellen»
+  bricht vorher mit «ClickUp ist ausgelastet» ab. Label der List beim Erstellen nur aus dem Cache.
+- Kommentartext ohne Steuer- und Bidi-Zeichen aus der Mail, Länge begrenzt.
+- Hinweis nach «ClickUp trennen» und Deaktivieren: Freigabe auch in ClickUp entfernen.
+- Tests schreiben nicht mehr ins App-Log (`LOG_CHANNEL=null` in `phpunit.xml`, `captureLogs()`
+  hört weiter auf `MessageLogged`).
+- `phpunit.xml`: `memory_limit` 512M, die ganze Suite in einem Prozess lag knapp über 128M.
+- 509 Tests grün.
+
+Gegen ClickUp noch nicht geprüft:
+
+- Darstellung von `&lt;` aus `MailMarkdown` in `markdown_content`.
+- Upload-Grenzen von ClickUp (Grösse je Datei, Zeitlimit 120 s je Upload).
+- Felder der Task-Anhänge in `GET /task/{id}` (`title` und `size` für den Abgleich).
+- Task ohne `assignees` und `priority`, `due_date` mit `due_date_time=false` als Tag.
+- Ob `GET /team` alle Mitglieder liefert (Gäste).
+
+Offen aus Schritt 5:
+
+- Sichtprüfung im Browser (hell, dunkel, Handybreite) mit dem Inhaber.
+- Wechselt der Admin den Workspace, bleiben bestehende Verbindungen ohne neue Prüfung bestehen.
+
+Für Schritt 7 (`docs/02-setup.md`):
+
+- Microsoft-Assistent `intake:install`, danach die Gruppe der Enterprise-App zuweisen.
+- ClickUp-OAuth-App anlegen, Client-ID und Secret auf der Seite «ClickUp», Workspace wählen.
+  Redirect-URL der OAuth-App auf die Produktion (`https://intake.guycolle.services/clickup/callback`)
+  umstellen.
+- systemd-Unit für den Queue-Worker, Cron für den Scheduler, Redis mit eigener DB-Nummer und
+  Prefix.
+- PHP-FPM- und Caddy-Zeitlimits mindestens 300 s.
+- `INTAKE_SUPPORT_ADDRESS=helpdesk@guycolle.com`.
+- Offboarding: Benutzer deaktivieren, Freigabe in ClickUp unter Settings, Apps entfernen,
+  Gruppenzuweisung in Entra entfernen.
+- Backup-Pfad `storage/app/private/intake` (E4 nennt noch `storage/app/intake`).
 
 ## Offen und bekannt
 

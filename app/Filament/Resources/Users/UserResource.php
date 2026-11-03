@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Users;
 
+use App\ClickUp\ClickUpApp;
 use App\Enums\ConnectionStatus;
 use App\Enums\Role;
 use App\Filament\Resources\Users\Pages\ListUsers;
@@ -114,7 +115,13 @@ class UserResource extends Resource
                             return;
                         }
 
-                        Notification::make()->title('Benutzer deaktiviert.')->success()->send();
+                        // ClickUp tokens do not expire, the authorization in ClickUp stays until removed there.
+                        Notification::make()
+                            ->title('Benutzer deaktiviert.')
+                            ->body(ClickUpApp::REVOKE_HINT)
+                            ->success()
+                            ->persistent()
+                            ->send();
                     }),
                 Action::make('activate')
                     ->label('Aktivieren')

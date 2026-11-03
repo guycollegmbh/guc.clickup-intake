@@ -29,8 +29,8 @@ class IntakeItemPolicy
 
     /**
      * Triage actions (create task, forward, discard) on items that are not done yet and have
-     * no ClickUp task (IntakeItem::isProcessable()). Step 5 adds a separate ability for
-     * "Fehlende Anhänge erneut hochladen" on failed items with clickup_task_id.
+     * no ClickUp task (IntakeItem::isProcessable()). A partial success has its own ability,
+     * retryUpload.
      */
     public function process(User $user, IntakeItem $item): bool
     {
@@ -44,6 +44,23 @@ class IntakeItemPolicy
     public function forward(User $user, IntakeItem $item): bool
     {
         return $this->process($user, $item) && $item->imported_at !== null;
+    }
+
+    /**
+     * "Task erstellen" needs a completely imported item, like forwarding: attachments of a
+     * failed import may be missing, and the poll would import it again.
+     */
+    public function createTask(User $user, IntakeItem $item): bool
+    {
+        return $this->forward($user, $item);
+    }
+
+    /**
+     * "Fehlende Anhänge erneut hochladen" on a partial success (failed with clickup_task_id).
+     */
+    public function retryUpload(User $user, IntakeItem $item): bool
+    {
+        return $this->owns($user, $item) && $item->isPartialSuccess();
     }
 
     public function create(User $user): bool

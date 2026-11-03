@@ -282,6 +282,88 @@ Ergänzt Schritt 4 der Spezifikation und E7, E8.
 
 ---
 
+## E10: ClickUp-Details Schritt 5 (2026-11-03)
+
+Aus der Umsetzung und den Reviews von Schritt 5. Ergänzt E2, E9 und Schritt 5 der
+Spezifikation. API-Fakten geprüft am 2026-11-03 in developer.clickup.com, echter Test beim
+Inhaber am 2026-11-03 erfolgreich (siehe `STATUS.md`).
+
+- **Beschreibung** geht als `markdown_content` an «Create Task», nicht als `markdown_description`
+  (Runde 1, Punkt 9). Die Spezifikation nennt noch `markdown_description`.
+- **Token des Handelnden** (E2): Task, Anhänge und Kommentar laufen mit dem ClickUp-Token dessen,
+  der «Task erstellen» klickt, auch wenn ein Admin für das Item eines anderen handelt. Er steht
+  in `processed_by`, der Upload-Job nutzt dessen Token. «Fehlende Anhänge erneut hochladen» setzt
+  `processed_by` auf den, der erneut klickt. Listen und Mitglieder auf der Triage-Seite sind die
+  des Handelnden.
+- **Vorbelegung:** Ziel-List aus der ersten passenden Regel, sonst `last_clickup_list_id` des
+  Handelnden, jeweils nur, wenn er die List sieht. Zuständige aus der Regel, sonst die
+  `clickup_member_id` des Postfach-Inhabers. Die Tabelle «Eingang» zeigt weiterhin die letzte List
+  des Inhabers.
+- **Due Date** als 12:00 Europe/Zurich in Millisekunden mit `due_date_time=false`, damit in jeder
+  Zeitzone derselbe Tag erscheint. Schnellwahl Heute, Morgen, in 1 Woche nach Zürcher Datum.
+- **Priorität** optional: Dringend 1, Hoch 2, Normal 3, Niedrig 4, sonst nicht gesendet.
+- **Kommentar** (Vorgabe an) als reiner Text, `notify_all=false`:
+  «Von: {Name} <{Adresse}>», «Empfangen: {TT.MM.JJJJ HH:MM Zürich}», «In Outlook: {web_link}» (nur
+  https), «Erstellt über ClickUp-Intake von {Handelnder}». Höchstens einmal je Task
+  (`clickup_comment_added_at`). Der Wunsch steht am Item (`clickup_comment_requested`), nicht nur
+  im Job, damit ein erneuter Upload einen gescheiterten Kommentar nachholt.
+- **Ablauf «Task erstellen»:** Sperre je Item (dieselbe wie beim Weiterleiten), Übergang nach
+  `creating` mit Auswahl der Anhänge (nur `isUploadable()`), Task synchron, dann Upload-Job.
+  Alle Uploads und der Kommentar durch: `created` und «ClickUp ✓» (R10). Sonst `failed` mit
+  `clickup_task_id` (Teilerfolg), der Text nennt die fehlenden Anhänge. Scheitert «Create Task»:
+  `failed` ohne Task, nach Verbindungsabbruch, 503 oder 504 mit «Unklar, ob der Task angelegt
+  wurde. Bitte zuerst in ClickUp prüfen.». POST wird bei 5xx nie wiederholt, bei 429 schon.
+- **Hängende Items:** `intake:poll` macht Items, die länger als 15 Minuten in `creating` stehen,
+  zu `failed` (mit Task «Der Upload wurde abgebrochen.», ohne Task «Die Task-Erstellung wurde
+  abgebrochen. Bitte in ClickUp prüfen.»). Ein Upload-Job, der scheitert oder sein Zeitlimit
+  erreicht, hinterlässt ebenfalls einen Teilerfolg.
+- **Verbinden:** OAuth mit `state` in der Session. Der Token wird erst gespeichert, wenn
+  `GET /user` und `GET /team` gelingen und der App-Workspace dabei ist, sonst wird mit deutschem
+  Text abgelehnt. Solange kein Workspace gewählt ist, können nur Admins verbinden (sie wählen ihn
+  danach auf der Seite «ClickUp» aus den Workspaces ihres Kontos).
+- **Code-Tausch bewusst per Query-String** (`client_id`, `client_secret`, `code`), wie die
+  Beispiele der ClickUp-Doku, im echten Test bestätigt. Das Secret steht damit in der URL des
+  ausgehenden Aufrufs. Vertretbar, weil die App direkt per TLS mit ClickUp spricht und auf vps06
+  kein protokollierender Proxy dazwischen liegt.
+- **Redirect-URL:** `http://localhost:8001/clickup/callback` funktioniert lokal (ClickUp prüft
+  nur Domain und Port der eingetragenen Adresse). Produktion: die Adresse aus `APP_URL`.
+- **401** setzt die ClickUp-Verbindung auf «unterbrochen» und löscht den Token, aber nur den
+  abgelehnten (ein inzwischen neu verbundener bleibt). «Trennen» löscht den Token,
+  `clickup_member_id` bleibt für die Vorbelegung.
+- **Rate-Limit** 100 Requests pro Minute je Token im Cache (Schlüssel ist ein Hash des Tokens),
+  festes Fenster von einer Minute. Prüfen und Zählen in einem Schritt (`hit()` zählt atomar und
+  liefert den neuen Stand). Im Web-Request wird höchstens 5 Sekunden auf einen freien Platz
+  gewartet, «Task erstellen» bricht dann vor jeder Änderung mit «ClickUp ist ausgelastet, bitte
+  gleich erneut versuchen.» ab. Im Job bis 60 Sekunden. 429 von ClickUp wartet nach
+  `X-RateLimit-Reset` bzw. `Retry-After`, höchstens 60 Sekunden.
+- **Cache:** Hierarchie und Mitglieder 1 Stunde je User und Workspace. «ClickUp-Listen neu laden»
+  darf jeder, es leert nur den eigenen Cache. «Task erstellen» liest das Label der List nur aus
+  dem Cache und lädt die Hierarchie nie im Request.
+- **Unklare Uploads und Kommentare** (Verbindungsabbruch, 503, 504) werden markiert und vor dem
+  erneuten Senden mit ClickUp abgeglichen: Anhänge über `GET /task/{id}` nach Name und Grösse,
+  der Kommentar über `GET /task/{id}/comment` nach dem eigenen Text (ohne die letzte Zeile, die
+  den Handelnden nennt). Gefunden gilt als erledigt, sonst wird gesendet. Scheitert der
+  Abgleich, wird der Eintrag übersprungen und im Fehlertext genannt.
+- **Zeitbudget des Upload-Jobs:** Vor jedem weiteren Anhang wird geprüft, ob Upload-Zeitlimit
+  (120 s) und Reserve (30 s) noch in die 300 s des Jobs passen. Sonst reiht der Job einen
+  Folgejob für den Rest ein und endet ohne Timeout (eindeutig nur bis zum Start, damit der
+  Folgejob eingereiht werden kann). Scheitert der Job trotzdem, nennt der Fehlertext die noch
+  fehlenden Anhänge.
+- **Task angelegt, aber nicht gespeichert:** Task-ID und URL ins Log, das Item wird `failed` ohne
+  Task mit «Der Task wurde angelegt, konnte aber nicht gespeichert werden: {URL}», kein Upload.
+- **Kommentartext:** Steuer- und Bidi-Zeichen in Absendername und Adresse werden zu Leerzeichen
+  (wie bei Anhangnamen), Name höchstens 100, Adresse 254 Zeichen. So entsteht keine zusätzliche
+  Zeile.
+- **Trennen und Deaktivieren** löschen den Token in der App. ClickUp-Tokens laufen nicht ab, darum
+  der Hinweis «In ClickUp unter Settings, Apps die Freigabe ebenfalls entfernen.».
+- **Regeln:** neue Regeln kommen ans Ende, Reihenfolge per Ziehen. Domain ohne Schema und Pfad
+  (führendes `@` erlaubt), Adresse als E-Mail geprüft. List und Zuständige aus der Verbindung des
+  Admins, das Label wird mit der Regel gespeichert.
+- **Validierung:** deutsche Meldungen ohne Feldnamen in `lang/de/validation.php` (Filament zeigt
+  sie unter dem Feld).
+
+---
+
 ## Weitere Punkte aus Runde 1
 
 | # | Punkt | Stand |
@@ -290,11 +372,11 @@ Ergänzt Schritt 4 der Spezifikation und E7, E8.
 | 2 | Theme inkompatibel | gelöst durch E5 |
 | 3 | Supervisor oder systemd | entschieden: systemd (E4) |
 | 4 | Wer darf sich anmelden | gelöst durch Gruppenzuweisung (E3) |
-| 5 | Teilerfolg bei «Task erstellen» | angenommen: `failed` mit `clickup_task_id`, Aktion «Fehlende Anhänge erneut hochladen» |
+| 5 | Teilerfolg bei «Task erstellen» | umgesetzt (E10): `failed` mit `clickup_task_id`, Aktion «Fehlende Anhänge erneut hochladen» |
 | 6 | Erneut markieren nach «Verwerfen» | angenommen: Item zurück auf `pending` |
 | 7 | Kategorien | angenommen: «ClickUp» wird durch «ClickUp ✓» bzw. «Support ✓» ersetzt, andere bleiben |
 | 8 | Inline-Bilder im sandboxed iframe | verifiziert, siehe E9 |
-| 9 | ClickUp-Feldname Beschreibung | in Schritt 5 prüfen |
+| 9 | ClickUp-Feldname Beschreibung | `markdown_content` (E10), im echten Test verwendet |
 | 10 | Retention vor Kategorie-Update | Item erst löschen, wenn die Kategorie gesetzt ist |
 | 11 | `guc.newsletter` nicht lokal | Versionen gegen `guc.bexio-abgleich` geprüft |
 | 12 | Grösse von Anhängen | Limit 50 MB je Anhang, konfigurierbar |

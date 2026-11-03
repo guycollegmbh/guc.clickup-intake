@@ -73,6 +73,9 @@ class IntakeItem extends Model
             'next_import_at' => 'datetime',
             'processed_at' => 'datetime',
             'outlook_category_synced_at' => 'datetime',
+            'clickup_comment_requested' => 'boolean',
+            'clickup_comment_added_at' => 'datetime',
+            'clickup_comment_uncertain' => 'boolean',
         ];
     }
 
@@ -102,6 +105,15 @@ class IntakeItem extends Model
     public function isProcessable(): bool
     {
         return $this->status->isProcessable() && $this->clickup_task_id === null;
+    }
+
+    /**
+     * Task created, but attachments or the comment are missing (failed with clickup_task_id).
+     * Only "Fehlende Anhänge erneut hochladen" applies (E9, E10).
+     */
+    public function isPartialSuccess(): bool
+    {
+        return $this->status === IntakeStatus::Failed && $this->clickup_task_id !== null;
     }
 
     /**

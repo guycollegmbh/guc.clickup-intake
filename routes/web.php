@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\MicrosoftLoginController;
+use App\Http\Controllers\ClickUpConnectionController;
 use App\Http\Controllers\MailContentController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +25,13 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/mail/attachments/{attachment}', [MailContentController::class, 'download'])
         ->whereNumber('attachment')
         ->name('intake.attachment');
+});
+
+// ClickUp OAuth per user (E2). The callback URL is entered in the ClickUp OAuth app.
+Route::middleware(['auth', 'throttle:20,1'])->group(function (): void {
+    Route::get('/clickup/connect', [ClickUpConnectionController::class, 'connect'])->name('clickup.connect');
+    Route::get('/clickup/callback', [ClickUpConnectionController::class, 'callback'])->name('clickup.callback');
+    Route::post('/clickup/disconnect', [ClickUpConnectionController::class, 'disconnect'])->name('clickup.disconnect');
 });
 
 // Inline images for the sandboxed iframe, which sends no session cookie: signed URLs only.

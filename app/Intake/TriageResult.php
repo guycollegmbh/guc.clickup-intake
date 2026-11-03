@@ -21,4 +21,10 @@ enum TriageResult
 
     /** Nothing done: the item was processed by someone else in the meantime, or is being. */
     case Skipped;
+
+    /** Nothing done: the acting user has no working ClickUp connection (E2). */
+    case NotConnected;
+
+    /** Nothing done: the ClickUp rate limit of the acting user is used up for the moment. */
+    case Busy;
 }
