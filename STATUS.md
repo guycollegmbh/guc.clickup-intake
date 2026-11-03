@@ -1,18 +1,18 @@
 # STATUS
 
-Stand 2026-11-03, Branch `develop`.
+Stand 2026-11-03. **V1 in Produktion** auf vps06, `https://intake.guycolle.services` (erster Deploy 2026-11-03).
 
 | Schritt | Inhalt | Stand |
 |---|---|---|
 | 0 | Konzept-Check, `docs/01-decisions.md` | erledigt, freigegeben |
 | 1 | Scaffold, Theme, Microsoft-Login, CI | erledigt |
 | 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, im Tenant geprüft |
-| 2 | Datenmodell Intake | umgesetzt, Review-Befunde behoben |
-| 3 | Intake über Graph | umgesetzt, Reviews offen |
-| 4 | Triage in Filament (ohne ClickUp-Teile) | umgesetzt, Review-Befunde behoben |
-| 5 | ClickUp-Client, OAuth je User, Task erstellen, Regeln | umgesetzt, echter Test erfolgreich, Review-Befunde behoben |
-| 6 | Tests | laufend je Schritt |
-| 7 | Doku und Abschluss | offen |
+| 2 | Datenmodell Intake | erledigt, reviewt |
+| 3 | Intake über Graph | erledigt, reviewt, im Tenant geprüft |
+| 4 | Triage in Filament | erledigt, reviewt, im Browser geprüft |
+| 5 | ClickUp-Client, OAuth je User, Task erstellen, Regeln | erledigt, reviewt, mit echtem ClickUp geprüft |
+| 6 | Tests | erledigt (509 Tests, CI grün) |
+| 7 | Doku und Abschluss | erledigt: `docs/02-setup.md`, `docs/03-usage.md`, Deploy vps06 |
 
 ## Schritt 1
 
@@ -364,3 +364,20 @@ Für Schritt 7 (`docs/02-setup.md`):
   Backup `storage/app/intake`, in Schritt 7 angleichen.
 - R4 und R7 in `.claude/rules/intake.md` sind noch nicht um E8 ergänzt (Regeldatei, Änderung
   durch den Inhaber).
+
+## Deploy 2026-11-03
+
+- PR #1 `develop` → `main`, Setup auf vps06 nach `docs/02-setup.md` (eigener System-User, FPM-Pool,
+  Worker, Cron, Caddy-Block, Redis DB 4/5). Die drei anderen Apps auf vps06 laufen unverändert.
+- `intake:install` in Produktion: App-Registration «GUYCOLLE ClickUp-Intake», Secret bis 03.11.2028.
+- Login, Abruf alle 2 Minuten und ClickUp-Verbindung in Produktion geprüft.
+
+## Offen nach V1
+
+- App auf dem Backup-Server erfassen (Inhaber).
+- Noch gegen echte Daten zu prüfen: Mail mit angehängter Mail (.eml), OneDrive-Link-Anhang,
+  Header `Keywords: ClickUp` von extern (setzt Exchange die Kategorie?), Darstellung von `\<` in
+  ClickUp-Beschreibungen, ClickUp-Upload-Grenzen, Gäste in ClickUp-Members.
+- Sichtprüfung Dunkelmodus und Handybreite.
+- Redis auf vps06 ohne Passwort (betrifft alle Apps, nur 127.0.0.1).
+- Phase C (Outlook-Button) frühestens nach 2 bis 4 Wochen Betrieb.
