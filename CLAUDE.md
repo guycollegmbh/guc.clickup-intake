@@ -4,7 +4,7 @@ Internes Tool der GUYCOLLE GmbH. Outlook-Mails mit der Kategorie «ClickUp» wer
 Graph in eine Triage-Queue geholt und dort zu ClickUp-Tasks.
 
 - Spezifikation: `docs/AGENT_PROMPT.md`
-- Entscheide: `docs/01-decisions.md` (E1 bis E7, gehen der Spezifikation vor)
+- Entscheide: `docs/01-decisions.md` (E1 bis E9, gehen der Spezifikation vor)
 - Harte Regeln: `.claude/rules/intake.md`
 - Arbeitsstand: `STATUS.md`
 
@@ -26,14 +26,15 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
   `OutlookCategories`, `Setup/` (Gerätecode, App-Registration).
 - `app/Intake/`: `MessageImporter` (Import und Dedupe nach E7 und E8), `MailboxPoller`,
   `ItemTransitions` (einzige Stelle für Statuswechsel, bedingte Updates), `AttachmentStore`
-  (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf Disk `local`), `Retention`.
-- `app/Jobs/`: `PollMailbox` (eindeutig je User), `SetupOutlookCategories` (nach Login).
-  Payload nur User-IDs.
+  (einzige Stelle für Anhang-Dateien, `intake/{item}/{id}` auf Disk `local`), `Retention`,
+  `TriageActions` (Verwerfen, Weiterleiten, prüft die Policy selbst), `RuleMatcher`, `TaskName`,
+  `MailMarkdown` mit `SafeLinkConverter`.
+- `app/Jobs/`: `PollMailbox` (eindeutig je User), `SetupOutlookCategories` (nach Login),
+  `SyncOutlookCategory` (eindeutig je Item, nach Bulk-Verwerfen). Payload nur IDs.
 - Commands: `intake:poll` (alle 2 Minuten), `intake:prune` (täglich), `intake:orphans`,
   `intake:setup-categories {upn?}`.
-- `app/Policies/`: Items (member eigene, admin alle), Regeln (nur admin).
-- `app/Intake/`: Import, Statusübergänge (`ItemTransitions`), Triage-Aktionen
-  (`TriageActions`), `RuleMatcher`, `TaskName`, `MailMarkdown`.
+- `app/Policies/`: Items (member eigene, admin alle, `process` und `forward`), Regeln und
+  Benutzer (nur admin).
 - `app/Filament/Resources/`: «Eingang» (Triage-Seite `TriageIntakeItem`), «Benutzer».
 - `app/Http/Controllers/MailContentController.php`: Original-HTML, Inline-Bilder (signiert),
   Downloads. Mail-HTML nur dort, nie im Panel.

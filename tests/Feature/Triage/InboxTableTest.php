@@ -3,6 +3,7 @@
 use App\Enums\IntakeStatus;
 use App\Filament\Resources\IntakeItems\IntakeItemResource;
 use App\Filament\Resources\IntakeItems\Pages\ListIntakeItems;
+use App\Jobs\SyncOutlookCategory;
 use App\Models\IntakeAttachment;
 use App\Models\IntakeItem;
 use App\Models\IntakeRule;
@@ -11,6 +12,7 @@ use Filament\Facades\Filament;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
 use Livewire\Livewire;
 use Tests\Support\FakeGraph;
@@ -47,12 +49,12 @@ it('shows imported and failed items, but no import in progress', function () {
 
     $this->actingAs($user);
     Livewire::test(ListIntakeItems::class)
-        ->filterTable('status', null)
+        ->filterTable('status', [])
         ->assertCanSeeTableRecords([$failedImport, $imported])
         ->assertCanNotSeeTableRecords([$importing]);
 });
 
-it('filters to open items by default', function () {
+it('filters to open and failed items by default', function () {
     $user = User::factory()->create();
     $pending = IntakeItem::factory()->for($user)->create();
     $failed = IntakeItem::factory()->for($user)->failed()->create();
@@ -61,11 +63,21 @@ it('filters to open items by default', function () {
     $this->actingAs($user);
     Livewire::test(ListIntakeItems::class)
         ->assertTableFilterExists('status')
-        ->assertCanSeeTableRecords([$pending])
-        ->assertCanNotSeeTableRecords([$failed, $discarded])
-        ->filterTable('status', IntakeStatus::Failed->value)
-        ->assertCanSeeTableRecords([$failed])
-        ->assertCanNotSeeTableRecords([$pending]);
+        ->assertCanSeeTableRecords([$pending, $failed])
+        ->assertCanNotSeeTableRecords([$discarded])
+        ->filterTable('status', [IntakeStatus::Discarded->value])
+        ->assertCanSeeTableRecords([$discarded])
+        ->assertCanNotSeeTableRecords([$pending, $failed]);
+});
+
+it('keeps a discarded failed import findable', function () {
+    $user = User::factory()->create();
+    $item = IntakeItem::factory()->for($user)->importing()->create(['status' => IntakeStatus::Discarded, 'processed_at' => now()]);
+
+    $this->actingAs($user);
+    Livewire::test(ListIntakeItems::class)
+        ->filterTable('status', [IntakeStatus::Discarded->value])
+        ->assertCanSeeTableRecords([$item]);
 });
 
 it('counts attachments without inline images and cloud links, and shows the pre-selected list', function () {
@@ -104,27 +116,58 @@ it('loads the table without the mail bodies and without a query per row', functi
         ->and($queries->filter(fn (string $q): bool => str_contains($q, 'from "users"'))->count())->toBeLessThanOrEqual(3);
 });
 
-it('discards only the selected items the user may process', function () {
+it('discards only the selected items the user may process and syncs the category by job', function () {
+    Queue::fake();
     $user = User::factory()->connected()->create();
     $open = IntakeItem::factory()->for($user)->create(['graph_message_id' => 'msg-1']);
     $failed = IntakeItem::factory()->for($user)->failed()->create(['graph_message_id' => 'msg-2']);
     $creating = IntakeItem::factory()->for($user)->create(['status' => IntakeStatus::Creating]);
-    FakeGraph::fake([
-        'GET me/messages/*' => Http::response(['categories' => ['ClickUp']]),
-        'PATCH me/messages/*' => fn (Request $r) => Http::response(['categories' => $r['categories']]),
-    ]);
+    $partial = IntakeItem::factory()->for($user)->failed()->create();
+    $partial->forceFill(['clickup_task_id' => 'abc123'])->save();
+    Http::fake();
 
     $this->actingAs($user);
     Livewire::test(ListIntakeItems::class)
-        ->filterTable('status', null)
-        ->callTableBulkAction('discard', [$open, $failed, $creating]);
+        ->filterTable('status', [])
+        ->callTableBulkAction('discard', [$open, $failed, $creating, $partial])
+        ->assertNotified('2 Mails verworfen.');
 
     expect($open->fresh()->status)->toBe(IntakeStatus::Discarded)
         ->and($open->fresh()->processed_by)->toBe($user->id)
-        ->and($open->fresh()->outlook_category_synced_at)->not->toBeNull()
         ->and($failed->fresh()->status)->toBe(IntakeStatus::Discarded)
-        ->and($creating->fresh()->status)->toBe(IntakeStatus::Creating);
-    Http::assertSentCount(4);
+        ->and($creating->fresh()->status)->toBe(IntakeStatus::Creating)
+        ->and($partial->fresh()->status)->toBe(IntakeStatus::Failed);
+    // No Graph call in the request, one job per discarded item.
+    Http::assertNothingSent();
+    Queue::assertPushed(SyncOutlookCategory::class, 2);
+    Queue::assertPushed(SyncOutlookCategory::class, fn (SyncOutlookCategory $job): bool => $job->itemId === $open->id);
+});
+
+it('skips an item discarded in the meantime and warns when nothing was discarded', function () {
+    Queue::fake();
+    $user = User::factory()->create();
+    $item = IntakeItem::factory()->for($user)->create();
+
+    $this->actingAs($user);
+    $table = Livewire::test(ListIntakeItems::class);
+    IntakeItem::query()->whereKey($item->id)->update(['status' => IntakeStatus::Discarded->value, 'processed_at' => now()]);
+    $table->callTableBulkAction('discard', [$item])->assertNotified('Keine Mail verworfen.');
+
+    Queue::assertNothingPushed();
+});
+
+it('sets the category of a bulk discarded item in the job', function () {
+    $user = User::factory()->connected()->create();
+    $item = IntakeItem::factory()->for($user)->processed(IntakeStatus::Discarded)->create(['graph_message_id' => 'msg-1']);
+    $item->forceFill(['outlook_category_synced_at' => null])->save();
+    FakeGraph::fake([
+        'GET me/messages/msg-1?*' => Http::response(['categories' => ['ClickUp']]),
+        'PATCH me/messages/msg-1' => fn (Request $r) => Http::response(['categories' => $r['categories']]),
+    ]);
+
+    SyncOutlookCategory::dispatch($item->id);
+
+    expect($item->fresh()->outlook_category_synced_at)->not->toBeNull();
 });
 
 it('cannot reach a foreign item through the bulk action', function () {

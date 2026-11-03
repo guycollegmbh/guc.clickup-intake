@@ -1,6 +1,6 @@
 # STATUS
 
-Stand 2026-11-02, Branch `develop`.
+Stand 2026-11-03, Branch `develop`.
 
 | Schritt | Inhalt | Stand |
 |---|---|---|
@@ -9,7 +9,7 @@ Stand 2026-11-02, Branch `develop`.
 | 1b | Setup-Assistent «Mit Microsoft 365 verbinden» (`intake:install`) | erledigt, im Tenant geprüft |
 | 2 | Datenmodell Intake | umgesetzt, Review-Befunde behoben |
 | 3 | Intake über Graph | umgesetzt, Reviews offen |
-| 4 | Triage in Filament (ohne ClickUp-Teile) | umgesetzt, Reviews offen |
+| 4 | Triage in Filament (ohne ClickUp-Teile) | umgesetzt, Review-Befunde behoben |
 | 5 | ClickUp-Client und OAuth je User | offen |
 | 6 | Tests | laufend je Schritt |
 | 7 | Doku und Abschluss | offen |
@@ -205,7 +205,7 @@ Resource «Regeln»), die folgen in Schritt 5 auf derselben Triage-Seite.
   Fehler: `failed` mit Text. Kategorie-Fehler: Status bleibt, Sync später durch den Poll.
 - Resource «Eingang» (`/eingang`): Tabelle ohne Bodies, Anhänge ohne inline und Links,
   vorbelegte List (Rule, sonst `last_clickup_list_label` des Inhabers), Filter Status (Vorgabe
-  Offen), Admins mit Spalte und Filter «Benutzer». Bulk «Verwerfen» je Item mit `process`.
+  Offen und Fehlgeschlagen), Admins mit Spalte und Filter «Benutzer». Bulk «Verwerfen» je Item mit `process`.
 - Triage-Seite (`/eingang/{id}`, View-Seite): Kopf, Taskname, Beschreibung (Markdown-Editor ohne
   Upload), Anhänge als Checkbox-Liste (Vorgabe `selected_for_upload`, Links und fehlerhafte nicht
   wählbar). Werte nur in `$data`, gespeichert wird erst mit «Task erstellen» (Schritt 5). Aktionen
@@ -215,7 +215,7 @@ Resource «Regeln»), die folgen in Schritt 5 auf derselben Triage-Seite.
   CSP ohne Script, `sandbox`), `/mail/{item}/inline/{attachment}` (nur signiert, 10 Minuten,
   nur Bilder nach finfo, kein SVG), `/mail/attachments/{id}` (auth, Policy, immer Download,
   `application/octet-stream`, `nosniff`, `CSP: sandbox`, bereinigter Name).
-- Runde 1, Punkt 8 im Browser geprüft (Chrome und WebKit, Testseite mit gleichen Headern):
+- Runde 1, Punkt 8 im Browser geprüft (E9) (Chrome und WebKit, Testseite mit gleichen Headern):
   Das iframe-Dokument erhält das Session-Cookie, die Bildanfragen aus dem Sandbox-iframe in
   Chrome nicht, darum signierte URLs. WebKit lässt `img-src 'self'` im Sandbox-Dokument nicht
   gelten, darum steht der Origin von `APP_URL` zusätzlich in `img-src`. Externe Bilder blockiert,
@@ -233,16 +233,40 @@ Detailentscheide:
 - Der Fehlertext eines `failed`-Items bleibt beim Verwerfen erhalten.
 - Bilder werden nicht in die Beschreibung übernommen (inline sind Anhänge, externe wären
   Tracking im Editor und in ClickUp).
-- Weiterleiten ist auch für ein `failed`-Item eines Import-Fehlers möglich. Scheitert es dort,
-  bleibt `imported_at` leer und der Poll importiert wie bisher neu.
+- Weiterleiten nur für importierte Items, ein Import-Fehler kann bis zum Neu-Import nur
+  verworfen werden (E9).
+
+## Reviews nach Schritt 4
+
+Architektur, Code und Security. Behoben, Entscheide in E9 (Inhaber 2026-11-03):
+
+- Teilerfolg (`failed` mit `clickup_task_id`) ist nicht bearbeitbar: `IntakeItem::isProcessable()`
+  und Scope `processable()`, Policy `process` und die Übergänge `discard`, `markForwarded`,
+  `markFailed` schliessen ihn aus (hoch). Platz für «Fehlende Anhänge erneut hochladen» in
+  Schritt 5 kommentiert.
+- Weiterleiten unter Sperre je Item (`intake:forward:{id}`). Nach Verbindungsabbruch, 503 oder
+  504 lautet der Text «Unklar, ob die Mail weitergeleitet wurde ...». 401 verwirft den
+  Access-Token.
+- Weiterleiten nur für importierte Items (Policy `forward`), `markFailed` nur mit `imported_at`.
+  So überschreibt der Poll keinen Fehlertext der Weiterleitung, und E7 bleibt gewahrt.
+- Deaktivierter Inhaber: Verwerfen meldet, dass Outlook nicht mehr angepasst wird. Retention
+  löscht solche Items nach 30 Tagen ohne Kategorie-Sync und zählt sie nicht als hängend.
+- Standardfilter «Offen» und «Fehlgeschlagen». `visibleInTriage()` zeigt auch erledigte Items
+  mit unvollständigem Import.
+- Bulk-Verwerfen: nur Statuswechsel im Request, Kategorie per Job `SyncOutlookCategory`,
+  Policy je Item mit `Gate::allows`, übersprungene gezählt, Warnung bei 0.
+- Beschreibung höchstens 100 000 Zeichen mit «(gekürzt)», Editor mit `maxLength`.
+  Klartext-Fallback läuft escaped über den HTML-Weg (keine Links oder Bilder).
+- `IntakeAttachment::isUploadable()` als einzige Regel für wählbare Anhänge.
+- Deaktivieren nimmt die Token-Sperre von `UserTokens`, `UserTokens` speichert erneuerte
+  Tokens nur, solange der User aktiv und verbunden ist.
+- 380 Tests grün.
 
 Offen aus Schritt 4:
 
 - Sichtprüfung im Browser (hell, dunkel, Handybreite) braucht einen Microsoft-Login, mit dem
   Inhaber.
-- Der Standardfilter «Offen» blendet `failed` aus (Spezifikation). Vorschlag: Vorgabe «Offen und
-  Fehlgeschlagen», braucht einen Entscheid.
-- Firefox nicht geprüft (Headless-Start im Sandkasten nicht möglich).
+- Firefox für die Inline-Bilder ungeprüft (E9).
 
 ## Offen und bekannt
 

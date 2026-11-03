@@ -208,3 +208,26 @@ it('forgets the cached access token so the next call renews it', function () {
         ->and($user->ms_refresh_token)->toBe('refresh-token-old')
         ->and($user->ms_connection_status)->toBe(ConnectionStatus::Connected);
 });
+
+it('does not store renewed tokens of a user deactivated during the renewal', function () {
+    $user = expiringUser();
+    Http::fake([TOKEN_URL => function () use ($user) {
+        // A deactivation that lands while Microsoft answers.
+        User::query()->whereKey($user->id)->update([
+            'active' => false,
+            'ms_refresh_token' => null,
+            'ms_access_token' => null,
+            'ms_token_expires_at' => null,
+            'ms_connection_status' => ConnectionStatus::Disconnected->value,
+        ]);
+
+        return Http::response(['access_token' => 'access-token-new', 'refresh_token' => 'refresh-token-new', 'expires_in' => 3600]);
+    }]);
+
+    expect(fn () => app(UserTokens::class)->accessToken($user))->toThrow(MicrosoftConnectionBroken::class);
+
+    $user->refresh();
+    expect($user->ms_access_token)->toBeNull()
+        ->and($user->ms_refresh_token)->toBeNull()
+        ->and($user->active)->toBeFalse();
+});

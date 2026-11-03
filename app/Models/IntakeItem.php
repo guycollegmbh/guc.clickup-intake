@@ -77,8 +77,8 @@ class IntakeItem extends Model
     }
 
     /**
-     * Visible in triage: completely imported, or failed (also a failed import, R6).
-     * An import in progress stays hidden.
+     * Visible in triage: completely imported, failed (also a failed import, R6) or finished
+     * (a failed import that was discarded stays findable). An import in progress stays hidden.
      *
      * @param  Builder<IntakeItem>  $query
      */
@@ -86,7 +86,35 @@ class IntakeItem extends Model
     {
         $query->where(fn (Builder $query) => $query
             ->whereNotNull('imported_at')
-            ->orWhere('status', IntakeStatus::Failed->value));
+            ->orWhereIn('status', [
+                IntakeStatus::Failed->value,
+                ...array_map(fn (IntakeStatus $status): string => $status->value, IntakeStatus::finalCases()),
+            ]));
+    }
+
+    /**
+     * Open for the triage actions (create task, forward, discard): pending or failed, and no
+     * ClickUp task yet. A failed item with clickup_task_id is a partial success (task created,
+     * uploads missing, decisions round 1, point 5). Step 5 handles it with its own ability
+     * ("Fehlende Anhänge erneut hochladen") and its own transition, not with these actions.
+     * scopeProcessable() is the same rule as a query.
+     */
+    public function isProcessable(): bool
+    {
+        return $this->status->isProcessable() && $this->clickup_task_id === null;
+    }
+
+    /**
+     * @param  Builder<IntakeItem>  $query
+     */
+    public function scopeProcessable(Builder $query): void
+    {
+        $query
+            ->whereIn('status', array_map(
+                fn (IntakeStatus $status): string => $status->value,
+                array_filter(IntakeStatus::cases(), fn (IntakeStatus $status): bool => $status->isProcessable()),
+            ))
+            ->whereNull('clickup_task_id');
     }
 
     /**

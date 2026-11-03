@@ -9,7 +9,6 @@ use App\Filament\Resources\IntakeItems\Pages\TriageIntakeItem;
 use App\Intake\RuleMatcher;
 use App\Intake\TaskName;
 use App\Intake\TriageActions;
-use App\Intake\TriageResult;
 use App\Models\IntakeItem;
 use App\Models\User;
 use BackedEnum;
@@ -52,7 +51,7 @@ class IntakeItemResource extends Resource
      */
     private const LIST_COLUMNS = [
         'id', 'user_id', 'subject', 'from_name', 'from_email', 'received_at', 'status', 'error',
-        'imported_at',
+        'imported_at', 'clickup_task_id',
     ];
 
     public static function getEloquentQuery(): Builder
@@ -123,7 +122,9 @@ class IntakeItemResource extends Resource
                     ->options(collect(IntakeStatus::cases())->mapWithKeys(
                         fn (IntakeStatus $status): array => [$status->value => $status->label()],
                     )->all())
-                    ->default(IntakeStatus::Pending->value),
+                    ->multiple()
+                    // Owner decision 2026-11-03 (E9): open and failed, so no failed mail is overlooked.
+                    ->default([IntakeStatus::Pending->value, IntakeStatus::Failed->value]),
                 SelectFilter::make('user_id')
                     ->label('Benutzer')
                     ->relationship('user', 'name')
@@ -141,7 +142,7 @@ class IntakeItemResource extends Resource
                     ->modalHeading('Ausgewählte Mails verwerfen')
                     ->modalDescription('In Outlook wird die Kategorie «ClickUp» entfernt. Bereits bearbeitete Mails werden übersprungen.')
                     ->modalSubmitActionLabel('Verwerfen')
-                    ->authorizeIndividualRecords('process')
+                    // The policy "process" is checked per item in TriageActions::discardMany().
                     ->action(function (Collection $records): void {
                         self::discardAll($records);
                     })
@@ -181,24 +182,23 @@ class IntakeItemResource extends Resource
     }
 
     /**
-     * @param  Collection<int, IntakeItem>  $records  already filtered by the policy "process"
+     * @param  Collection<int, IntakeItem>  $records
      */
     private static function discardAll(Collection $records): void
     {
         $actor = Auth::user();
         assert($actor instanceof User);
-        $actions = app(TriageActions::class);
 
-        $results = $records->map(fn (IntakeItem $item): TriageResult => $actions->discard($item, $actor));
-        $discarded = $results->filter(fn (TriageResult $result): bool => in_array($result, [TriageResult::Done, TriageResult::CategoryPending], true))->count();
-        $pending = $results->filter(fn (TriageResult $result): bool => $result === TriageResult::CategoryPending)->count();
+        ['discarded' => $discarded, 'skipped' => $skipped] = app(TriageActions::class)->discardMany($records, $actor);
 
-        $notification = Notification::make()
-            ->title($discarded === 1 ? '1 Mail verworfen.' : "{$discarded} Mails verworfen.")
-            ->success();
+        $notification = $discarded === 0
+            ? Notification::make()->title('Keine Mail verworfen.')->warning()
+            : Notification::make()->title($discarded === 1 ? '1 Mail verworfen.' : "{$discarded} Mails verworfen.")->success();
 
-        if ($pending > 0) {
-            $notification->body('Die Kategorie in Outlook wird beim nächsten Abgleich angepasst.')->warning();
+        if ($skipped > 0) {
+            $notification->body($skipped === 1
+                ? '1 Mail wurde übersprungen, sie ist bereits bearbeitet oder nicht freigegeben.'
+                : "{$skipped} Mails wurden übersprungen, sie sind bereits bearbeitet oder nicht freigegeben.");
         }
 
         $notification->send();

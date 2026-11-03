@@ -4,12 +4,15 @@ use App\Enums\ConnectionStatus;
 use App\Enums\Role;
 use App\Filament\Resources\Users\Pages\ListUsers;
 use App\Filament\Resources\Users\UserResource;
+use App\Microsoft\UserTokens;
 use App\Models\User;
 use App\Policies\UserPolicy;
 use App\Users\UserAdministration;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Sleep;
 use Livewire\Livewire;
 
 beforeEach(fn () => Filament::setCurrentPanel(Filament::getPanel('app')));
@@ -127,4 +130,23 @@ it('shows a banner when the Microsoft connection is broken', function () {
 
     $this->actingAs($broken)->get('/')->assertOk()->assertSee($text);
     $this->actingAs(User::factory()->connected()->create())->get('/')->assertOk()->assertDontSee($text);
+});
+
+it('waits for a running token renewal before deactivating', function () {
+    Sleep::fake(syncWithCarbon: true);
+    $admin = User::factory()->admin()->create();
+    $user = connectedEverywhere();
+    $lock = Cache::lock(UserTokens::lockName($user->id), 60);
+    $lock->get();
+
+    $this->actingAs($admin);
+    Livewire::test(ListUsers::class)
+        ->callAction(TestAction::make('deactivate')->table($user))
+        ->assertNotified('Der Benutzer wird gerade abgeglichen. Bitte in einer Minute erneut versuchen.');
+
+    expect($user->fresh()->active)->toBeTrue();
+
+    $lock->release();
+    app(UserAdministration::class)->deactivate($user, $admin);
+    expect($user->fresh()->active)->toBeFalse();
 });

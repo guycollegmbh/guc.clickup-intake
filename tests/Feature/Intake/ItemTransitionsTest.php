@@ -154,3 +154,23 @@ it('leaves the sync open when the category update fails', function () {
     expect(fn () => app(ItemTransitions::class)->syncCategory($item))->toThrow(GraphException::class);
     expect($item->fresh()->outlook_category_synced_at)->toBeNull();
 });
+
+it('never discards, forwards or fails a partial success with a ClickUp task', function () {
+    $item = IntakeItem::factory()->failed('Anhänge fehlen.')->create();
+    $item->forceFill(['clickup_task_id' => 'abc123'])->save();
+    $actor = User::factory()->create();
+    $transitions = app(ItemTransitions::class);
+
+    expect($transitions->discard($item, $actor))->toBeFalse()
+        ->and($transitions->markForwarded($item, $actor))->toBeFalse()
+        ->and($transitions->markFailed($item, 'x'))->toBeFalse()
+        ->and($item->status)->toBe(IntakeStatus::Failed)
+        ->and($item->error)->toBe('Anhänge fehlen.');
+});
+
+it('marks only imported items as failed in triage', function () {
+    $item = IntakeItem::factory()->importing()->failed('Import fehlgeschlagen.')->create();
+
+    expect(app(ItemTransitions::class)->markFailed($item, 'Weiterleitung fehlgeschlagen.'))->toBeFalse()
+        ->and($item->error)->toBe('Import fehlgeschlagen.');
+});

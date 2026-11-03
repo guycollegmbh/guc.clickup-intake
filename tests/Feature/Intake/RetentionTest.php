@@ -4,6 +4,7 @@ use App\Enums\IntakeStatus;
 use App\Intake\AttachmentStore;
 use App\Models\IntakeAttachment;
 use App\Models\IntakeItem;
+use App\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -134,4 +135,24 @@ it('is scheduled daily without overlapping', function () {
     expect($event)->not->toBeNull()
         ->and($event->withoutOverlapping)->toBeTrue()
         ->and($event->expression)->toBe('30 3 * * *');
+});
+
+it('deletes items of a deactivated user after the retention period without synced category', function () {
+    $inactive = User::factory()->inactive()->create();
+    $due = itemWithFile(IntakeItem::factory()->for($inactive)->processed(IntakeStatus::Discarded, now()->subDays(31))->create());
+    $due->forceFill(['outlook_category_synced_at' => null])->save();
+    $recent = IntakeItem::factory()->for($inactive)->processed(IntakeStatus::Discarded, now()->subDays(5))->create();
+    $recent->forceFill(['outlook_category_synced_at' => null])->save();
+    $logs = captureLogs();
+
+    $this->artisan('intake:prune')
+        ->expectsOutput('Deleted items: 1')
+        ->expectsOutput('Stuck items (Outlook category not synced): 0')
+        ->assertSuccessful();
+
+    expect($due->fresh())->toBeNull()
+        ->and($recent->fresh())->not->toBeNull()
+        ->and(logText($logs))->toContain('"intake_item_id":'.$due->id)
+        ->not->toContain($due->subject);
+    Storage::disk('local')->assertMissing("intake/{$due->id}");
 });

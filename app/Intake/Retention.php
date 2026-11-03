@@ -17,6 +17,9 @@ use Illuminate\Support\Facades\Log;
  * point 10). Items whose category never synced are reported as stuck and deleted after
  * retention_hard_limit_days anyway, with a log entry, so they cannot pile up silently.
  *
+ * Items of a deactivated owner can never sync (no token, E9): they are deleted after
+ * retention_days without sync and are not counted as stuck. Log entries carry ids only.
+ *
  * pending, creating and failed are never touched (R6). Deletion goes through Eloquent so the
  * model event removes the files (R8).
  */
@@ -34,6 +37,16 @@ class Retention
 
         $deleted = $this->deleteEach(
             $this->due($cutoff)->whereNotNull('outlook_category_synced_at'),
+        );
+
+        $deleted += $this->deleteEach(
+            $this->due($cutoff)->whereNull('outlook_category_synced_at')->whereHas('user', fn (Builder $query) => $query->where('active', false)),
+            function (IntakeItem $item): void {
+                Log::info('Retention: deleting item of a deactivated user without synced Outlook category.', [
+                    'intake_item_id' => $item->id,
+                    'user_id' => $item->user_id,
+                ]);
+            },
         );
 
         $forced = $this->deleteEach(

@@ -35,8 +35,10 @@ use Illuminate\Support\Number;
 /**
  * Triage of one mail (step 4): mail header, task fields, original in a sandboxed iframe
  * (R13) and the actions. The task fields live in $data only and are not saved here: step 5
- * adds list, assignees, due date, priority, the comment option and "Task erstellen", which
- * reads them with $this->form->getState() and stores the attachment selection.
+ * adds list, assignees, due date, priority, the comment option and "Task erstellen". That
+ * action only reads $this->form->getState() and passes it to
+ * TriageActions::createTask($item, $actor, $draft), which stores the attachment selection.
+ * The page holds no business logic.
  *
  * Mail content is shown escaped only, never with {!! !!}.
  *
@@ -85,6 +87,7 @@ class TriageIntakeItem extends ViewRecord
             MarkdownEditor::make('description')
                 ->label('Beschreibung')
                 ->fileAttachments(false)
+                ->maxLength(MailMarkdown::MAX_LENGTH)
                 ->toolbarButtons([
                     ['bold', 'italic', 'strike', 'link'],
                     ['heading', 'blockquote', 'bulletList', 'orderedList'],
@@ -99,7 +102,7 @@ class TriageIntakeItem extends ViewRecord
                 ->descriptions($attachments->mapWithKeys(fn (IntakeAttachment $attachment): array => [
                     (string) $attachment->id => self::attachmentDescription($attachment),
                 ])->all())
-                ->disableOptionWhen(fn (string $value): bool => ! self::isSelectable($attachments->firstWhere('id', (int) $value)))
+                ->disableOptionWhen(fn (string $value): bool => ! ($attachments->firstWhere('id', (int) $value)?->isUploadable() ?? false))
                 ->bulkToggleable()
                 ->visible($attachments->isNotEmpty()),
         ]);
@@ -184,7 +187,7 @@ class TriageIntakeItem extends ViewRecord
                 ->label('An Support weiterleiten')
                 ->icon(Heroicon::OutlinedLifebuoy)
                 ->color('gray')
-                ->authorize('process')
+                ->authorize('forward')
                 ->visible($address !== null)
                 ->requiresConfirmation()
                 ->modalHeading('An Support weiterleiten')
@@ -225,6 +228,9 @@ class TriageIntakeItem extends ViewRecord
         match ($result) {
             TriageResult::Done => Notification::make()->title($done)->success()->send(),
             TriageResult::CategoryPending => Notification::make()->title($categoryPending)->warning()->send(),
+            TriageResult::OwnerInactive => Notification::make()->title($done)
+                ->body('Die Kategorie in Outlook kann nicht mehr angepasst werden, weil der Benutzer deaktiviert ist.')
+                ->warning()->send(),
             TriageResult::Failed => Notification::make()->title('Fehlgeschlagen')->body($this->getRecord()->error)->danger()->persistent()->send(),
             TriageResult::Skipped => Notification::make()->title('Die Mail wurde inzwischen bearbeitet.')->warning()->send(),
         };
@@ -242,7 +248,7 @@ class TriageIntakeItem extends ViewRecord
             'task_name' => TaskName::fromSubject($item->subject),
             'description' => app(MailMarkdown::class)->convert($item->body_html, $item->body_text),
             'attachment_ids' => $this->listedAttachments()
-                ->filter(fn (IntakeAttachment $attachment): bool => $attachment->selected_for_upload && self::isSelectable($attachment))
+                ->filter(fn (IntakeAttachment $attachment): bool => $attachment->selected_for_upload && $attachment->isUploadable())
                 ->map(fn (IntakeAttachment $attachment): string => (string) $attachment->id)
                 ->values()
                 ->all(),
@@ -261,17 +267,6 @@ class TriageIntakeItem extends ViewRecord
             ->where('is_inline', false)
             ->orderBy('id')
             ->get();
-    }
-
-    /**
-     * Uploadable to ClickUp: a stored file without error. A cloud link has no file (E7).
-     */
-    private static function isSelectable(?IntakeAttachment $attachment): bool
-    {
-        return $attachment !== null
-            && $attachment->type !== AttachmentType::Reference
-            && $attachment->storage_path !== null
-            && $attachment->error === null;
     }
 
     private static function attachmentDescription(IntakeAttachment $attachment): string

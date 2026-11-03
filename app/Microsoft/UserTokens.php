@@ -30,9 +30,9 @@ class UserTokens
      */
     private const EXPIRY_BUFFER_SECONDS = 600;
 
-    private const LOCK_SECONDS = 60;
+    public const LOCK_SECONDS = 60;
 
-    private const LOCK_WAIT_SECONDS = 20;
+    public const LOCK_WAIT_SECONDS = 20;
 
     /**
      * OAuth errors that only a new interactive sign-in can fix.
@@ -63,7 +63,7 @@ class UserTokens
         }
 
         try {
-            return Cache::lock('microsoft-token:'.$user->id, self::LOCK_SECONDS)
+            return Cache::lock(self::lockName($user->id), self::LOCK_SECONDS)
                 ->block(self::LOCK_WAIT_SECONDS, function () use ($user): string {
                     // Another job may have renewed it while we waited for the lock.
                     $user->refresh();
@@ -140,9 +140,31 @@ class UserTokens
             $user->ms_refresh_token = $refreshToken;
         }
 
-        $user->save();
+        // Written only while the user is still active and connected: a deactivation during
+        // the renewal must not get the tokens back (E9).
+        $stored = User::query()
+            ->whereKey($user->getKey())
+            ->where('active', true)
+            ->where('ms_connection_status', ConnectionStatus::Connected->value)
+            ->update($user->getDirty()) === 1;
+
+        if (! $stored) {
+            $user->refresh();
+
+            throw new MicrosoftConnectionBroken($user->id, 'deactivated_during_refresh');
+        }
+
+        $user->syncOriginal();
 
         return $accessToken;
+    }
+
+    /**
+     * Lock around every change of a user's Microsoft tokens. Deactivation takes it as well.
+     */
+    public static function lockName(int $userId): string
+    {
+        return 'microsoft-token:'.$userId;
     }
 
     private function markBroken(User $user, string $reason): never

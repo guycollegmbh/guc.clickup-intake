@@ -240,6 +240,48 @@ Aus den Reviews zu Schritt 3. Ergänzt E6 und E7.
 
 ---
 
+## E9: Triage-Details Schritt 4 (2026-11-03)
+
+Aus der Umsetzung und den Reviews zu Schritt 4, mit Entscheiden des Inhabers vom 2026-11-03.
+Ergänzt Schritt 4 der Spezifikation und E7, E8.
+
+- **Inline-Bilder** über eine signierte, relative Route (`/mail/{item}/inline/{attachment}`,
+  10 Minuten gültig), nicht über die Session. Im Browser geprüft: Chrome schickt aus einem
+  iframe mit `sandbox=""` kein Session-Cookie mit den Bildanfragen. Die Route liefert nur Bilder
+  des Items nach dem Inhalt der Datei, kein SVG.
+- **CSP der Original-Ansicht:** zusätzlich zu `'self'` steht der Origin von `APP_URL` in
+  `img-src`. WebKit (Safari) lässt `'self'` im Sandbox-Dokument nicht gelten, ohne den Origin
+  fehlen dort die Inline-Bilder. Dazu `base-uri 'none'`, `form-action 'none'` und `sandbox`, damit
+  die Route auch direkt geöffnet gesperrt bleibt. Firefox ist ungeprüft.
+- **Resource «Benutzer»** (nur Admin), zusätzlich zur Spezifikation: Rolle ändern, Deaktivieren
+  (löscht Microsoft- und ClickUp-Tokens, unter derselben Sperre wie die Token-Erneuerung),
+  Aktivieren. Nicht für sich selbst.
+- **Resource «Regeln»** wird nach Schritt 5 verschoben, sie braucht die List-Auswahl aus ClickUp.
+- **Standardfilter** im Eingang: «Offen» und «Fehlgeschlagen» (Inhaber), damit keine
+  fehlgeschlagene Mail übersehen wird.
+- **Teilerfolg** (`failed` mit `clickup_task_id`) ist nicht bearbeitbar wie ein offenes Item:
+  Verwerfen, Weiterleiten und «Task erstellen» schliessen es aus (`IntakeItem::isProcessable()`).
+  Schritt 5 behandelt es mit eigener Berechtigung und eigenem Übergang («Fehlende Anhänge erneut
+  hochladen», Runde 1, Punkt 5).
+- **Weiterleiten** nur für vollständig importierte Items. Ein Import-Fehler wird vom Poll neu
+  importiert (E8) und würde einen Fehlertext der Weiterleitung überschreiben. `imported_at` zu
+  setzen, obwohl Anhänge fehlen können, widerspräche E7. Bis zum erfolgreichen Neu-Import kann
+  eine solche Mail nur verworfen werden.
+- **Weiterleiten** läuft unter einer Sperre je Item. Nach Verbindungsabbruch, 503 oder 504 ist
+  unklar, ob Graph die Mail gesendet hat: Der Fehlertext verweist auf «Gesendete Elemente» statt
+  auf einen neuen Versuch.
+- **Bulk-Verwerfen** ändert im Request nur den Status, die Kategorie setzt ein Job je Item.
+  Einzel-Verwerfen bleibt synchron.
+- **Mails deaktivierter User** (Inhaber): Die Kategorie lässt sich ohne Token nicht mehr ändern.
+  Verwerfen meldet das ehrlich, die Retention zählt solche Items nicht als hängend und löscht sie
+  nach `retention_days` auch ohne synchronisierte Kategorie (Log nur mit IDs).
+- **Sichtbarkeit:** Die Triage zeigt zusätzlich erledigte Items, auch wenn ihr Import nicht
+  vollständig war (z. B. ein verworfener Import-Fehler bleibt auffindbar).
+- **Beschreibung:** Vorbelegung höchstens 100 000 Zeichen, sonst gekürzt mit «(gekürzt)». Bilder
+  werden nicht übernommen, Links nur http, https, mailto.
+
+---
+
 ## Weitere Punkte aus Runde 1
 
 | # | Punkt | Stand |
@@ -251,7 +293,7 @@ Aus den Reviews zu Schritt 3. Ergänzt E6 und E7.
 | 5 | Teilerfolg bei «Task erstellen» | angenommen: `failed` mit `clickup_task_id`, Aktion «Fehlende Anhänge erneut hochladen» |
 | 6 | Erneut markieren nach «Verwerfen» | angenommen: Item zurück auf `pending` |
 | 7 | Kategorien | angenommen: «ClickUp» wird durch «ClickUp ✓» bzw. «Support ✓» ersetzt, andere bleiben |
-| 8 | Inline-Bilder im sandboxed iframe | kurzlebige signierte URLs, in Schritt 4 verifizieren |
+| 8 | Inline-Bilder im sandboxed iframe | verifiziert, siehe E9 |
 | 9 | ClickUp-Feldname Beschreibung | in Schritt 5 prüfen |
 | 10 | Retention vor Kategorie-Update | Item erst löschen, wenn die Kategorie gesetzt ist |
 | 11 | `guc.newsletter` nicht lokal | Versionen gegen `guc.bexio-abgleich` geprüft |

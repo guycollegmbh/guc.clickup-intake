@@ -16,6 +16,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -105,7 +106,14 @@ class UserResource extends Resource
                     ->modalDescription('Die Anmeldung wird gesperrt und die Verbindungen zu Microsoft 365 und ClickUp werden gelöscht. Seine Mails bleiben im Eingang.')
                     ->modalSubmitActionLabel('Deaktivieren')
                     ->action(function (User $record): void {
-                        app(UserAdministration::class)->deactivate($record, self::actor());
+                        try {
+                            app(UserAdministration::class)->deactivate($record, self::actor());
+                        } catch (LockTimeoutException) {
+                            Notification::make()->title('Der Benutzer wird gerade abgeglichen. Bitte in einer Minute erneut versuchen.')->warning()->send();
+
+                            return;
+                        }
+
                         Notification::make()->title('Benutzer deaktiviert.')->success()->send();
                     }),
                 Action::make('activate')

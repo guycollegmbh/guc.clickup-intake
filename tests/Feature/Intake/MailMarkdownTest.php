@@ -60,7 +60,37 @@ it('separates the cells of layout tables', function () {
 });
 
 it('falls back to the plain text without HTML', function () {
-    expect(markdown('', "Zeile <b>eins</b>\nZeile zwei"))->toBe("Zeile &lt;b>eins&lt;/b>\nZeile zwei");
+    expect(markdown('', "Zeile <b>eins</b>\nZeile zwei"))->toBe("Zeile &lt;b&gt;eins&lt;/b&gt;\nZeile zwei");
+});
+
+it('masks links and images in the plain text fallback', function () {
+    $result = markdown('', '[x](javascript:alert(1)) ![p](https://tracker.test/p.gif)');
+
+    expect($result)->toBe('\\[x\\](javascript:alert(1)) !\\[p\\](https://tracker.test/p.gif)')
+        ->not->toMatch('/(?<!\\\\)\\[[^\\]]*\\]\\(/');
+});
+
+it('converts a plain text body as the import stores it', function () {
+    $body = nl2br(e("Guten Tag\n<script>alert(1)</script>\n[x](javascript:alert(1))\n\nGruss"));
+
+    expect(markdown($body))->toBe("Guten Tag\n&lt;script&gt;alert(1)&lt;/script&gt;\n\\[x\\](javascript:alert(1))\n\nGruss");
+});
+
+it('survives broken HTML and falls back to the plain text', function (string $html) {
+    expect(markdown($html, 'Klartext'))->toBeString()->not->toMatch('/<[a-z\/!?]/i');
+})->with([
+    'unclosed' => ['<p>offen <b>fett <div><a href="https://x.test">Link'],
+    'stray closing tags' => ['</p></div>Text</td></tr></table>'],
+    'garbage' => ["\x00\xff<<<>>><!-- <script>alert(1)</script>"],
+    'nested tables' => ['<table><tr><td><table><tr><td>innen</td></tr></table></td></tr></table>'],
+    'only a tag' => ['<br>'],
+]);
+
+it('cuts a very long result and marks it', function () {
+    $result = markdown('<p>'.str_repeat('Langer Text ', 180_000).'</p>');
+
+    expect(mb_strlen($result))->toBeLessThanOrEqual(MailMarkdown::MAX_LENGTH)
+        ->and($result)->toEndWith("\n\n(gekürzt)");
 });
 
 it('recognises safe link targets only', function (string $href, ?string $expected) {
@@ -76,3 +106,10 @@ it('recognises safe link targets only', function (string $href, ?string $expecte
     ['/relative', null],
     ['https:///x', null],
 ]);
+
+it('logs only the exception class when the HTML cannot be converted', function () {
+    $logs = captureLogs();
+
+    expect(markdown("\x00\xff<<<>>><!-- <script>alert(1)</script>", 'Klartext'))->toBe('Klartext')
+        ->and(logText($logs))->not->toContain('alert');
+});

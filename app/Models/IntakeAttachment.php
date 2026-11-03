@@ -47,6 +47,17 @@ class IntakeAttachment extends Model
     }
 
     /**
+     * Can be uploaded to ClickUp: a stored file without storage error. A cloud link
+     * (referenceAttachment) has no file (E7). Triage offers only these for selection.
+     */
+    public function isUploadable(): bool
+    {
+        return $this->type !== AttachmentType::Reference
+            && $this->storage_path !== null
+            && $this->error === null;
+    }
+
+    /**
      * @return BelongsTo<IntakeItem, $this>
      */
     public function item(): BelongsTo

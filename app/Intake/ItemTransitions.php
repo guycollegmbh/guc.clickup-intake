@@ -28,6 +28,8 @@ class ItemTransitions
 {
     private const IMPORT_RETRY_MAX_MINUTES = 60;
 
+    private const PROCESSABLE = [IntakeStatus::Pending, IntakeStatus::Failed];
+
     public function __construct(private OutlookCategories $categories) {}
 
     /**
@@ -68,12 +70,13 @@ class ItemTransitions
     }
 
     /**
-     * Discarded in triage (R10: syncCategory() then removes "ClickUp"). Only from pending or
-     * failed, so a parallel action is never overwritten. The error text of a failed item stays.
+     * Discarded in triage (R10: syncCategory() then removes "ClickUp"). Only from a
+     * processable state (IntakeItem::isProcessable()), so a parallel action is never
+     * overwritten. The error text of a failed item stays.
      */
     public function discard(IntakeItem $item, User $actor): bool
     {
-        return $this->transition($item, IntakeStatus::Discarded, [IntakeStatus::Pending, IntakeStatus::Failed], actor: $actor);
+        return $this->transition($item, IntakeStatus::Discarded, self::PROCESSABLE, actor: $actor, requireProcessable: true);
     }
 
     /**
@@ -82,23 +85,26 @@ class ItemTransitions
      */
     public function markForwarded(IntakeItem $item, User $actor): bool
     {
-        return $this->transition($item, IntakeStatus::Forwarded, [IntakeStatus::Pending, IntakeStatus::Failed], [
+        return $this->transition($item, IntakeStatus::Forwarded, self::PROCESSABLE, [
             'error' => null,
-        ], actor: $actor);
+        ], actor: $actor, requireProcessable: true);
     }
 
     /**
-     * A triage action failed (R6). imported_at is left as it is: an imported item is never
-     * imported again by the poll (E8).
+     * A triage action on an imported item failed (R6). imported_at stays set, so the poll
+     * never imports it again and the text stays (E8, E9).
      *
      * @param  string  $error  German text, shown in triage
      */
     public function markFailed(IntakeItem $item, string $error): bool
     {
-        return $this->transition($item, IntakeStatus::Failed, [IntakeStatus::Pending, IntakeStatus::Failed], [
+        return $this->transition($item, IntakeStatus::Failed, self::PROCESSABLE, [
             'error' => $error,
-        ]);
+        ], requireProcessable: true, requireImported: true);
     }
+
+    // Step 5: the partial success (failed with clickup_task_id) gets its own transition here
+    // for "Fehlende Anhänge erneut hochladen", the three above never touch it.
 
     /**
      * Brings the Outlook category of the item's mail in line with its final status and records
@@ -176,6 +182,8 @@ class ItemTransitions
         array $attributes = [],
         ?User $actor = null,
         bool $requireNotImported = false,
+        bool $requireProcessable = false,
+        bool $requireImported = false,
     ): bool {
         $query = IntakeItem::query()
             ->whereKey($item->getKey())
@@ -183,6 +191,14 @@ class ItemTransitions
 
         if ($requireNotImported) {
             $query->whereNull('imported_at');
+        }
+
+        if ($requireImported) {
+            $query->whereNotNull('imported_at');
+        }
+
+        if ($requireProcessable) {
+            $query->processable();
         }
 
         $changed = $query->update([

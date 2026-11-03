@@ -5,13 +5,18 @@ use App\Enums\IntakeStatus;
 use App\Filament\Resources\IntakeItems\IntakeItemResource;
 use App\Filament\Resources\IntakeItems\Pages\TriageIntakeItem;
 use App\Intake\MailboxPoller;
+use App\Intake\MailMarkdown;
 use App\Intake\TriageActions;
+use App\Intake\TriageResult;
 use App\Models\IntakeAttachment;
 use App\Models\IntakeItem;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
@@ -301,4 +306,120 @@ it('shows who processed a finished item and when', function () {
     Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])
         ->assertSee('02.11.2026 10:30 Paula Prüfer')
         ->assertSee('Verworfen');
+});
+
+it('says it is unclear whether the mail went out after a lost connection, 503 or 504', function (mixed $response) {
+    $item = triageItem();
+    FakeGraph::fake(['POST me/messages/msg-1/forward' => $response]);
+
+    $this->actingAs($item->user);
+    Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])->callAction('forwardToSupport');
+
+    expect($item->fresh()->status)->toBe(IntakeStatus::Failed)
+        ->and($item->fresh()->error)->toBe('Unklar, ob die Mail weitergeleitet wurde. Bitte zuerst in Outlook unter Gesendete Elemente prüfen.');
+    // A POST is never repeated (a lost connection is not recorded at all).
+    expect(count(Http::recorded()))->toBeLessThanOrEqual(1);
+})->with([
+    'connection' => fn () => fn () => throw new ConnectionException('timeout'),
+    '503' => fn () => Http::response([], 503),
+    '504' => fn () => Http::response([], 504),
+]);
+
+it('drops the access token when Graph rejects it on forwarding', function () {
+    $item = triageItem();
+    FakeGraph::fake(['POST me/messages/msg-1/forward' => Http::response(['error' => ['code' => 'InvalidAuthenticationToken']], 401)]);
+
+    $this->actingAs($item->user);
+    Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])->callAction('forwardToSupport');
+
+    expect($item->fresh()->status)->toBe(IntakeStatus::Failed)
+        ->and($item->fresh()->error)->toBe('Weiterleitung fehlgeschlagen: Microsoft 365 hat mit Fehler 401 geantwortet.')
+        ->and($item->user->fresh()->ms_access_token)->toBeNull();
+});
+
+it('sends no second forward while the item is locked', function () {
+    $item = triageItem();
+    Http::fake();
+    $lock = Cache::lock('intake:forward:'.$item->id, 60);
+    $lock->get();
+
+    expect(app(TriageActions::class)->forwardToSupport($item, $item->user))->toBe(TriageResult::Skipped);
+
+    Http::assertNothingSent();
+    expect($item->fresh()->status)->toBe(IntakeStatus::Pending);
+    $lock->release();
+});
+
+it('reports a forward as skipped when the status changed during the request', function () {
+    $item = triageItem();
+    FakeGraph::fake(['POST me/messages/msg-1/forward' => function () use ($item) {
+        IntakeItem::query()->whereKey($item->id)->update(['status' => IntakeStatus::Discarded->value, 'processed_at' => now()]);
+
+        return Http::response(null, 202);
+    }]);
+
+    expect(app(TriageActions::class)->forwardToSupport($item, $item->user))->toBe(TriageResult::Skipped)
+        ->and($item->fresh()->status)->toBe(IntakeStatus::Discarded);
+    expect(Cache::lock('intake:forward:'.$item->id, 1)->get())->toBeTrue();
+});
+
+it('offers only discarding for a failed import, so the poll can still import it', function () {
+    $item = triageItem(attributes: ['imported_at' => null, 'status' => IntakeStatus::Failed, 'error' => 'Import fehlgeschlagen.']);
+    Http::fake();
+
+    $this->actingAs($item->user);
+    Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])
+        ->assertActionHidden('forwardToSupport')
+        ->assertActionVisible('discard');
+
+    expect(fn () => app(TriageActions::class)->forwardToSupport($item, $item->user))->toThrow(AuthorizationException::class)
+        ->and($item->fresh()->error)->toBe('Import fehlgeschlagen.');
+    Http::assertNothingSent();
+});
+
+it('offers no triage action on a partial success with a ClickUp task', function () {
+    $item = triageItem(attributes: ['status' => IntakeStatus::Failed, 'error' => 'Anhänge fehlen.']);
+    $item->forceFill(['clickup_task_id' => 'abc123'])->save();
+
+    $this->actingAs($item->user);
+    Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])
+        ->assertActionHidden('discard')
+        ->assertActionHidden('forwardToSupport');
+});
+
+it('discards the item of a deactivated user and says Outlook cannot be updated', function () {
+    $owner = User::factory()->inactive()->create();
+    $item = triageItem($owner);
+    Http::fake();
+
+    $this->actingAs(User::factory()->admin()->create());
+    Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])
+        ->callAction('discard')
+        ->assertNotified(Notification::make()->title('Mail verworfen.')
+            ->body('Die Kategorie in Outlook kann nicht mehr angepasst werden, weil der Benutzer deaktiviert ist.')
+            ->warning());
+
+    expect($item->fresh()->status)->toBe(IntakeStatus::Discarded)
+        ->and($item->fresh()->outlook_category_synced_at)->toBeNull();
+    Http::assertNothingSent();
+});
+
+it('says forwarding is impossible for a deactivated owner', function () {
+    $item = triageItem(User::factory()->inactive()->create());
+    Http::fake();
+
+    expect(app(TriageActions::class)->forwardToSupport($item, User::factory()->admin()->create()))->toBe(TriageResult::Failed)
+        ->and($item->fresh()->error)->toBe('Weiterleitung nicht möglich: Der Benutzer des Postfachs ist deaktiviert.');
+    Http::assertNothingSent();
+});
+
+it('cuts a very long description and marks it', function () {
+    $item = triageItem(attributes: ['body_html' => '<p>'.str_repeat('Langer Text ', 180_000).'</p>']);
+
+    $this->actingAs($item->user);
+    $description = Livewire::test(TriageIntakeItem::class, ['record' => $item->getRouteKey()])->get('data.description');
+
+    expect(strlen($item->body_html))->toBeGreaterThan(2_000_000)
+        ->and(mb_strlen($description))->toBeLessThanOrEqual(MailMarkdown::MAX_LENGTH)
+        ->and($description)->toEndWith("\n\n(gekürzt)");
 });

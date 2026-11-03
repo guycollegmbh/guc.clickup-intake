@@ -121,3 +121,24 @@ it('enables strict authorization and still serves the dashboard', function () {
 it('does not serve the local disk over a route', function () {
     expect(Route::has('storage.local'))->toBeFalse();
 });
+
+it('treats a failed item with a ClickUp task as partial success, not as processable', function () {
+    $member = User::factory()->create();
+    $partial = IntakeItem::factory()->for($member)->failed('Anhänge fehlen.')->create(['status' => IntakeStatus::Failed]);
+    $partial->forceFill(['clickup_task_id' => 'abc123'])->save();
+
+    expect($partial->isProcessable())->toBeFalse()
+        ->and($member->can('process', $partial))->toBeFalse()
+        ->and($member->can('forward', $partial))->toBeFalse()
+        ->and(IntakeItem::query()->processable()->whereKey($partial->id)->exists())->toBeFalse();
+});
+
+it('allows forwarding of imported items only', function () {
+    $member = User::factory()->create();
+    $failedImport = IntakeItem::factory()->for($member)->importing()->failed()->create();
+    $imported = IntakeItem::factory()->for($member)->failed()->create();
+
+    expect($member->can('process', $failedImport))->toBeTrue()
+        ->and($member->can('forward', $failedImport))->toBeFalse()
+        ->and($member->can('forward', $imported))->toBeTrue();
+});

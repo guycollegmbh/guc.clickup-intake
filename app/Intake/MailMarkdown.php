@@ -26,6 +26,11 @@ class MailMarkdown
         'img', 'picture', 'video', 'audio', 'canvas', 'map',
     ];
 
+    /** Longest description, also the limit of the editor. */
+    public const MAX_LENGTH = 100_000;
+
+    public const TRUNCATED = '(gekürzt)';
+
     private HtmlConverter $converter;
 
     public function __construct()
@@ -43,21 +48,47 @@ class MailMarkdown
     }
 
     /**
-     * @param  string|null  $fallbackText  used if the HTML is empty or cannot be converted
+     * @param  string|null  $fallbackText  used if the HTML is empty or cannot be converted. It is
+     *                                     sender input too and takes the same HTML path
+     *                                     (escaped), so it cannot carry links or images.
      */
     public function convert(?string $html, ?string $fallbackText = null): string
     {
-        $markdown = null;
+        $markdown = $this->fromHtml((string) $html);
 
-        if (trim((string) $html) !== '') {
-            try {
-                $markdown = $this->converter->convert(self::separateTableCells((string) $html));
-            } catch (Throwable $e) {
-                Log::warning('Mail HTML could not be converted to Markdown.', ['exception' => $e::class]);
-            }
+        if ($markdown === null && trim((string) $fallbackText) !== '') {
+            $markdown = $this->fromHtml(nl2br(e((string) $fallbackText)))
+                ?? addcslashes(e((string) $fallbackText), '\\`*_[]()!#');
         }
 
-        return self::tidy($markdown ?? (string) $fallbackText);
+        return self::limit(self::tidy((string) $markdown));
+    }
+
+    private function fromHtml(string $html): ?string
+    {
+        if (trim($html) === '') {
+            return null;
+        }
+
+        try {
+            return $this->converter->convert(self::separateTableCells($html));
+        } catch (Throwable $e) {
+            Log::warning('Mail HTML could not be converted to Markdown.', ['exception' => $e::class]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Very long mails are cut for the editor and ClickUp, with a visible note.
+     */
+    private static function limit(string $markdown): string
+    {
+        if (mb_strlen($markdown) <= self::MAX_LENGTH) {
+            return $markdown;
+        }
+
+        return rtrim(mb_substr($markdown, 0, self::MAX_LENGTH - mb_strlen(self::TRUNCATED) - 2))."\n\n".self::TRUNCATED;
     }
 
     /**

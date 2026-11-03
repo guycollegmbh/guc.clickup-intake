@@ -28,11 +28,22 @@ class IntakeItemPolicy
     }
 
     /**
-     * Triage actions (create task, forward, discard) on items that are not done yet.
+     * Triage actions (create task, forward, discard) on items that are not done yet and have
+     * no ClickUp task (IntakeItem::isProcessable()). Step 5 adds a separate ability for
+     * "Fehlende Anhänge erneut hochladen" on failed items with clickup_task_id.
      */
     public function process(User $user, IntakeItem $item): bool
     {
-        return $this->owns($user, $item) && $item->status->isProcessable();
+        return $this->owns($user, $item) && $item->isProcessable();
+    }
+
+    /**
+     * Forwarding needs a completely imported item. A failed import is retried by the poll,
+     * which would overwrite a forward error (E8, E9). Until then it can only be discarded.
+     */
+    public function forward(User $user, IntakeItem $item): bool
+    {
+        return $this->process($user, $item) && $item->imported_at !== null;
     }
 
     public function create(User $user): bool
