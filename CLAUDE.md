@@ -91,7 +91,8 @@ Tests verbieten echte HTTP-Aufrufe (`Http::preventStrayRequests()` in `tests/Pes
 
 vps06, `intake.guycolle.services`, Caddy, Queue-Worker als systemd-Unit, Scheduler per Cron.
 Queue `retry_after` 360 s, muss über dem längsten Job-Timeout liegen (`PollMailbox`: 300 s).
-Details folgen in `docs/02-setup.md` (Schritt 7).
+Einrichtung, Deploy (`deploy/deploy.sh`), Backup und Offboarding: `docs/02-setup.md`.
+Anleitung fürs Team: `docs/03-usage.md`.
 
 ## Agenten (`.claude/agents/`)
 
