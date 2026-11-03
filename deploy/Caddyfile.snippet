@@ -1,0 +1,23 @@
+intake.guycolle.services {
+	root * /var/www/clickup-intake/public
+	encode zstd gzip
+
+	php_fastcgi unix//run/php/php8.4-fpm-clickup-intake.sock {
+		# Task creation and forwarding run synchronously (E10).
+		read_timeout 300s
+		write_timeout 300s
+	}
+	file_server
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+
+	log {
+		format console
+	}
+}

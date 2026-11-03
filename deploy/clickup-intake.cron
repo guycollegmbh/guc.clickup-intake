@@ -1,0 +1,3 @@
+# /etc/cron.d/clickup-intake
+SHELL=/bin/sh
+* * * * * clickupintake cd /var/www/clickup-intake && /usr/bin/php artisan schedule:run >> /var/log/clickup-intake/schedule.log 2>&1
