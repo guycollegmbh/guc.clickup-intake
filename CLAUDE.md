@@ -4,7 +4,7 @@ Internes Tool der GUYCOLLE GmbH. Outlook-Mails mit der Kategorie «ClickUp» wer
 Graph in eine Triage-Queue geholt und dort zu ClickUp-Tasks.
 
 - Spezifikation: `docs/AGENT_PROMPT.md`
-- Entscheide: `docs/01-decisions.md` (E1 bis E9, gehen der Spezifikation vor)
+- Entscheide: `docs/01-decisions.md` (E1 bis E11, gehen der Spezifikation vor)
 - Harte Regeln: `.claude/rules/intake.md`
 - Arbeitsstand: `STATUS.md`
 
@@ -33,7 +33,7 @@ Redis (Queue, Cache) in Produktion, Pest, GitHub Actions.
 - `app/Jobs/`: `PollMailbox` (eindeutig je User), `SetupOutlookCategories` (nach Login),
   `SyncOutlookCategory` (eindeutig je Item, nach Bulk-Verwerfen), `UploadTaskAttachments`
   (eindeutig je Item). Payload nur IDs.
-- Commands: `intake:poll` (alle 2 Minuten, macht hängende `creating` zu `failed`),
+- Commands: `intake:poll` (jede Minute, macht hängende `creating` zu `failed`),
   `intake:prune` (täglich), `intake:orphans`,
   `intake:setup-categories {upn?}`.
 - `app/Policies/`: Items (member eigene, admin alle, `process`, `forward`, `createTask`,

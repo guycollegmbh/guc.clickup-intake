@@ -14,7 +14,7 @@ Caddy, PHP-FPM oder Redis betrifft alle Apps: Konfiguration vorher sichern und p
 | Caddy | Block `intake.guycolle.services` in `/etc/caddy/Caddyfile`, Zeitlimit 300 s |
 | Queue | Redis, DB 4 (Queue) und 5 (Cache), Prefix `clickup_intake_` |
 | Worker | `clickup-intake-worker.service`, Log `/var/log/clickup-intake/worker.log` |
-| Scheduler | `/etc/cron.d/clickup-intake` (jede Minute `schedule:run`): `intake:poll` alle 2 Minuten, `intake:prune` täglich 03:30 UTC |
+| Scheduler | `/etc/cron.d/clickup-intake` (jede Minute `schedule:run`): `intake:poll` jede Minute, `intake:prune` täglich 03:30 UTC |
 | Datenbank | SQLite `database/database.sqlite` |
 | Anhänge | `storage/app/private/intake/{item}/{anhang}` |
 | App-Log | `storage/logs/laravel-YYYY-MM-DD.log` (Level warning) |

@@ -13,8 +13,9 @@ Danach gibt es in Outlook die Kategorien «ClickUp», «ClickUp ✓» und «Supp
 
 1. **Markieren:** In Outlook (Mac, Web oder iPhone) die Mail mit der Kategorie **«ClickUp»**
    versehen.
-2. **Prüfen:** Nach höchstens zwei Minuten steht die Mail in der App unter **«Eingang»**. Öffnen,
-   Taskname, Beschreibung, Ziel-Liste, Zuständige, Fälligkeit und Anhänge prüfen.
+2. **Prüfen:** Nach rund einer Minute steht die Mail in der App unter **«Eingang»**, die Liste
+   aktualisiert sich von selbst. Öffnen, Taskname, Beschreibung, Ziel-Liste, Zuständige,
+   Fälligkeit und Anhänge prüfen.
 3. **Erstellen:** **«Task erstellen»** klicken. Die Anhänge werden im Hintergrund hochgeladen. Ist
    alles durch, trägt die Mail in Outlook **«ClickUp ✓»**.
 

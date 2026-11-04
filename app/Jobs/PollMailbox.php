@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Log;
  * The payload is the user id only, never a token (R11c). timeout stays below the queue's
  * retry_after (config/queue.php), so a slow run is never picked up twice. Expected failures
  * (connection, token, Graph) end the job normally: the next poll follows in two minutes, and
- * failed_jobs is not filled every two minutes by a lasting problem.
+ * failed_jobs is not filled every minute by a lasting problem.
  */
 class PollMailbox implements ShouldBeUnique, ShouldQueue
 {

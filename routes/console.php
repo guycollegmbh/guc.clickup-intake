@@ -10,4 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('intake:prune')->dailyAt('03:30')->withoutOverlapping();
 
-Schedule::command('intake:poll')->everyTwoMinutes()->withoutOverlapping();
+Schedule::command('intake:poll')->everyMinute()->withoutOverlapping();
