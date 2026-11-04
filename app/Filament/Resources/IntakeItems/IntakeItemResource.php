@@ -74,6 +74,8 @@ class IntakeItemResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            // New mails arrive by the poll (every minute, E11), the list follows without reload.
+            ->poll('30s')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
                 ->select(array_map(fn (string $column): string => 'intake_items.'.$column, self::LIST_COLUMNS))
                 ->with('user:id,name,last_clickup_list_label')

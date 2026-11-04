@@ -11,7 +11,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 
 /**
- * Runs every two minutes (routes/console.php). Only users with a working Microsoft connection
+ * Runs every minute (routes/console.php, E11). Only users with a working Microsoft connection
  * are polled (E1). The work happens in the queue, one unique job per user.
  *
  * First, items stuck in creating (worker killed during "Task erstellen") become failed, for

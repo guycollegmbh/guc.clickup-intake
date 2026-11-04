@@ -169,12 +169,12 @@ it('times out before the queue hands the job to another worker', function () {
         ->and($job->timeout)->toBeLessThan(config('queue.connections.database.retry_after'));
 });
 
-it('runs the poll every two minutes without overlapping', function () {
+it('runs the poll every minute without overlapping', function () {
     $event = collect(app(Schedule::class)->events())
         ->first(fn ($event): bool => str_contains((string) $event->command, 'intake:poll'));
 
     expect($event)->not->toBeNull()
-        ->and($event->expression)->toBe('*/2 * * * *')
+        ->and($event->expression)->toBe('* * * * *')
         ->and($event->withoutOverlapping)->toBeTrue();
 });
 

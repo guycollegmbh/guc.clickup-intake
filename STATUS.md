@@ -374,8 +374,9 @@ Für Schritt 7 (`docs/02-setup.md`):
 
 ## Offen nach V1
 
-- App auf dem Backup-Server erfassen (Inhaber).
-- Noch gegen echte Daten zu prüfen: Mail mit angehängter Mail (.eml), OneDrive-Link-Anhang,
+- Backup-Server: App erfasst (Inhaber, 2026-11-03).
+- Team der Gruppe zugewiesen, Anleitung verteilt (Inhaber, 2026-11-03).
+- Prüft der Inhaber laufend im Betrieb: Mail mit angehängter Mail (.eml), OneDrive-Link-Anhang,
   Header `Keywords: ClickUp` von extern (setzt Exchange die Kategorie?), Darstellung von `\<` in
   ClickUp-Beschreibungen, ClickUp-Upload-Grenzen, Gäste in ClickUp-Members.
 - Sichtprüfung Dunkelmodus und Handybreite.

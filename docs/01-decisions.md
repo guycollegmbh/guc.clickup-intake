@@ -364,6 +364,16 @@ Inhaber am 2026-11-03 erfolgreich (siehe `STATUS.md`).
 
 ---
 
+## E11: Abruf jede Minute, Eingang aktualisiert sich (2026-11-04)
+
+Auf Wunsch des Inhabers: `intake:poll` jede Minute statt alle 2 Minuten (Spezifikation Schritt 3),
+die Liste «Eingang» lädt sich alle 30 Sekunden selbst neu. Eine markierte Mail erscheint damit nach
+höchstens rund einer Minute. Bei 5 Personen 5 kurze Graph-Abfragen pro Minute, unkritisch. Pro User
+läuft weiterhin nur ein Abruf gleichzeitig (`ShouldBeUnique`). Push über Graph-Webhooks wurde
+verworfen: deutlich mehr Aufbau und Betrieb für wenig Gewinn.
+
+---
+
 ## Weitere Punkte aus Runde 1
 
 | # | Punkt | Stand |
