@@ -1,2 +1,5 @@
+# Crawling stays allowed on purpose: search engines must fetch the pages to see the
+# "X-Robots-Tag: noindex" header (App\Http\Middleware\NoIndex). A Disallow here would
+# hide that header and keep already indexed URLs in the results.
 User-agent: *
 Disallow:

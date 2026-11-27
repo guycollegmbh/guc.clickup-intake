@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\NoIndex;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,6 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Caddy terminates TLS on the same host. Without this, URLs (e.g. the Microsoft redirect URI)
         // would be built with http:// and every client would look like 127.0.0.1 to the throttle.
         $middleware->trustProxies(at: ['127.0.0.1', '::1']);
+
+        // Internal tool, never in search results.
+        $middleware->append(NoIndex::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
